@@ -1,0 +1,2345 @@
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../routes/app_routes.dart';
+import '../../services/content_filter_service.dart';
+import '../../services/presence_service.dart';
+import '../../services/realtime_notification_service.dart';
+import '../../services/revenuecat_service.dart';
+import '../../services/supabase_service.dart';
+import '../../services/referral_service.dart';
+import '../../services/web_push_notification_service.dart';
+import '../../theme/app_theme.dart';
+import './widgets/profile_edit_bio_widget.dart';
+import './widgets/profile_interests_widget.dart';
+import './widgets/profile_stats_widget.dart';
+import './widgets/profile_video_hero_widget.dart';
+import '../../../main.dart' show manualLogout;
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  String _editBio = '';
+  List<String> _editInterests = [];
+
+  late Future<Map<String, dynamic>?> _profileFuture;
+
+  int? _sparkCount;
+  int? _sessionCount;
+  int? _matchCount;
+  bool _statsLoading = true;
+
+  // Referral stats
+  int _friendsCount = 0;
+  int _sparksEarned = 0;
+  String _referralLink = '';
+  bool _referralLoading = true;
+  bool _showNotificationSettings = false;
+  bool _notificationActionInProgress = false;
+  WebPushSetupResult? _notificationState;
+
+  RealtimeChannel? _matchesRealtimeChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileFuture = _fetchProfile();
+    _loadStats();
+    _loadReferralData();
+    _subscribeToMatchesRealtime();
+    if (kIsWeb) _loadNotificationState();
+  }
+
+  @override
+  void dispose() {
+    _matchesRealtimeChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  Future<Map<String, dynamic>?> _fetchProfile() async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null) return null;
+    final data = await SupabaseService.instance.getUserProfile(uid);
+    if (data != null) {
+      _editBio = data['bio'] ?? '';
+      _editInterests = _parseInterests(data['interests']);
+    }
+    return data;
+  }
+
+  Future<void> _loadStats() async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null) {
+      if (mounted) setState(() => _statsLoading = false);
+      return;
+    }
+
+    try {
+      final sparksResult = await SupabaseService.instance.client
+          .from('interactions')
+          .select('id')
+          .eq('from_user_id', uid)
+          .eq('action_type', 'spark');
+      final sparksCount = (sparksResult as List).length;
+
+      final matchesForSessions = await SupabaseService.instance.client
+          .from('matches')
+          .select('id')
+          .or('user_1_id.eq.$uid,user_2_id.eq.$uid');
+      final matchIds = (matchesForSessions as List)
+          .map((m) => m['id'] as String)
+          .toList();
+
+      int sessionsCount = 0;
+      if (matchIds.isNotEmpty) {
+        final sessionsResult = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('id')
+            .inFilter('match_id', matchIds);
+        sessionsCount = (sessionsResult as List).length;
+      }
+
+      final matchesResult = await SupabaseService.instance.client
+          .from('matches')
+          .select('id')
+          .or('user_1_id.eq.$uid,user_2_id.eq.$uid')
+          .eq('status', 'chat_unlocked');
+      final matchesCount = (matchesResult as List).length;
+
+      if (mounted) {
+        setState(() {
+          _sparkCount = sparksCount;
+          _sessionCount = sessionsCount;
+          _matchCount = matchesCount;
+          _statsLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('PROFILE STATS: Error loading stats: $e');
+      if (mounted) setState(() => _statsLoading = false);
+    }
+  }
+
+  Future<void> _loadNotificationState() async {
+    final state = await WebPushNotificationService.instance.currentSetupState();
+    if (mounted) {
+      setState(() => _notificationState = state);
+    }
+  }
+
+  Future<void> _enableWebNotifications() async {
+    debugPrint('WEB PUSH: settings enable tapped');
+    setState(() {
+      _notificationActionInProgress = true;
+      _notificationState = const WebPushSetupResult(
+        success: false,
+        status: 'Enabling notifications…',
+        message: 'Enabling notifications…',
+      );
+    });
+    final result = await WebPushNotificationService.instance
+        .enableNotifications();
+    if (mounted) {
+      setState(() {
+        _notificationState = result;
+        _notificationActionInProgress = false;
+      });
+    }
+  }
+
+  Future<void> _sendWebTestNotification() async {
+    setState(() {
+      _notificationActionInProgress = true;
+      _notificationState = const WebPushSetupResult(
+        success: false,
+        status: 'Sending test notification…',
+        message: 'Sending test notification…',
+      );
+    });
+    final result = await WebPushNotificationService.instance
+        .sendTestNotification();
+    if (mounted) {
+      setState(() {
+        _notificationState = result;
+        _notificationActionInProgress = false;
+      });
+    }
+  }
+
+  Future<void> _loadReferralData() async {
+    try {
+      final link = await ReferralService.instance.getReferralLink();
+      final stats = await ReferralService.instance.getReferralStats();
+      if (mounted) {
+        setState(() {
+          _referralLink = link;
+          _friendsCount = stats['friendsCount'] ?? 0;
+          _sparksEarned = stats['sparksEarned'] ?? 0;
+          _referralLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('REFERRAL: loadReferralData error: $e');
+      if (mounted) setState(() => _referralLoading = false);
+    }
+  }
+
+  void _subscribeToMatchesRealtime() {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null) return;
+
+    _matchesRealtimeChannel = SupabaseService.instance.client
+        .channel('profile_stats_matches:$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'matches',
+          callback: (_) {
+            _loadStats();
+          },
+        )
+        .subscribe();
+  }
+
+  List<String> _parseInterests(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return [];
+  }
+
+  void _toggleEdit(Map<String, dynamic> profile) {
+    if (_isEditing) {
+      _saveProfile(profile);
+    } else {
+      setState(() => _isEditing = true);
+    }
+  }
+
+  Future<void> _saveProfile(Map<String, dynamic> profile) async {
+    setState(() => _isSaving = true);
+    try {
+      final uid = SupabaseService.instance.currentUserId;
+      if (uid != null) {
+        await SupabaseService.instance.updateUserProfile({
+          'bio': _editBio,
+          'interests': _editInterests,
+        });
+      }
+      if (mounted) {
+        setState(() {
+          profile['bio'] = _editBio;
+          profile['interests'] = List<String>.from(_editInterests);
+          _isEditing = false;
+          _isSaving = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile updated', style: GoogleFonts.dmSans()),
+            backgroundColor: AppTheme.sparkGreen,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        final errorText = e.toString().replaceFirst('Exception: ', '');
+        final message = errorText == ContentFilterService.violationMessage
+            ? ContentFilterService.violationMessage
+            : 'Save failed: $errorText';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message, style: GoogleFonts.dmSans()),
+            backgroundColor: AppTheme.error,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
+  void _cancelEdit(Map<String, dynamic> profile) {
+    setState(() {
+      _editBio = profile['bio'] ?? '';
+      _editInterests = _parseInterests(profile['interests']);
+      _isEditing = false;
+    });
+  }
+
+  void _refreshProfile() {
+    setState(() {
+      _profileFuture = _fetchProfile();
+    });
+    _loadStats();
+  }
+
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'You\'ll need to sign back in to access your Spark Sessions and chats.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              manualLogout = true;
+              await SupabaseService.instance.signOut();
+              if (mounted) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context,
+                  AppRoutes.authScreen,
+                  (route) => false,
+                );
+              }
+            },
+            child: Text(
+              'Sign out',
+              style: GoogleFonts.dmSans(color: AppTheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDeleteAccountFlow() async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Delete account?',
+          style: GoogleFonts.dmSans(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes or anonymizes your FaceMeet account data where legally and technically possible, including:',
+                style: GoogleFonts.dmSans(
+                  color: AppTheme.textSecondary,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ...const [
+                'profile',
+                'profile video',
+                'matches',
+                'chats/messages',
+                'device tokens',
+                'reports/block relationships where appropriate',
+                'subscription/customer references where appropriate',
+              ].map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.check_rounded,
+                        color: AppTheme.primary,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item,
+                          style: GoogleFonts.dmSans(
+                            color: AppTheme.textMuted,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Active subscriptions are not cancelled in FaceMeet. Manage subscriptions through the Apple App Store or Google Play.',
+                style: GoogleFonts.dmSans(
+                  color: AppTheme.textSecondary,
+                  height: 1.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Continue',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.error,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (proceed != true || !mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _DeleteAccountConfirmationSheet(onConfirmed: _performAccountDeletion),
+    );
+  }
+
+  Future<void> _performAccountDeletion() async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    debugPrint('ACCOUNT DELETE: user confirmed deletion');
+    await PresenceService.instance.setOffline();
+    RealtimeNotificationService.instance.dispose();
+    await SupabaseService.instance.deleteAccount(confirmation: 'DELETE');
+    await RevenueCatService.instance.logOutCurrentUser();
+
+    manualLogout = true;
+    await SupabaseService.instance.signOut();
+
+    if (!mounted) return;
+    navigator.pushNamedAndRemoveUntil(AppRoutes.authScreen, (route) => false);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Your FaceMeet account has been deleted.',
+          style: GoogleFonts.dmSans(),
+        ),
+        backgroundColor: AppTheme.sparkGreen,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  Future<void> _handleResetDiscovery() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Reset all your swipes?',
+          style: GoogleFonts.dmSans(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Text(
+          'This will let you see every profile again.',
+          style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Reset',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final uid = SupabaseService.instance.currentUserId;
+      if (uid != null) {
+        await Supabase.instance.client
+            .from('interactions')
+            .delete()
+            .eq('from_user_id', uid);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Discovery feed reset — all profiles are now discoverable again',
+              style: GoogleFonts.dmSans(),
+            ),
+            backgroundColor: AppTheme.sparkGreen,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Reset failed: $e', style: GoogleFonts.dmSans()),
+            backgroundColor: AppTheme.error,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
+  // ─── Username Edit ────────────────────────────────────────────────────────
+
+  void _showUsernameEditSheet(String currentUsername) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _UsernameEditSheet(
+        currentUsername: currentUsername,
+        onSaved: (newUsername) {
+          setState(() {
+            _profileFuture = _fetchProfile();
+          });
+          _loadReferralData();
+        },
+      ),
+    );
+  }
+
+  // ─── Share helpers ────────────────────────────────────────────────────────
+
+  String get _shareMessage =>
+      'Hey, I\'m on FaceMeet — a dating app where you video date before you match. '
+      'No catfish, no wasted time, just real faces first. Join me here: $_referralLink';
+
+  Future<void> _shareWhatsApp() async {
+    final encoded = Uri.encodeComponent(_shareMessage);
+    final uri = Uri.parse('https://wa.me/?text=$encoded');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('WhatsApp not installed')));
+      }
+    }
+  }
+
+  Future<void> _shareSms() async {
+    final encoded = Uri.encodeComponent(_shareMessage);
+    final uri = Uri.parse('sms:?body=$encoded');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('SMS not available on this device')),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareMore() async {
+    await Share.share(_shareMessage, subject: 'Join me on FaceMeet');
+  }
+
+  Future<void> _inviteContacts() async {
+    final status = await Permission.contacts.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Contacts permission is required to invite friends'),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _ContactsInviteSheet(
+          contacts: contacts,
+          shareMessage: _shareMessage,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not load contacts: $e')));
+      }
+    }
+  }
+
+  Future<void> _openSupportEmail() async {
+    final uid = SupabaseService.instance.currentUserId;
+    PackageInfo? packageInfo;
+    try {
+      packageInfo = await PackageInfo.fromPlatform();
+    } catch (e) {
+      debugPrint('SUPPORT EMAIL: package info unavailable: $e');
+    }
+
+    final platform = switch (defaultTargetPlatform) {
+      TargetPlatform.iOS => 'iOS',
+      TargetPlatform.android => 'Android',
+      _ => kIsWeb ? 'Web' : defaultTargetPlatform.name,
+    };
+
+    final details = <String>[
+      '',
+      '',
+      '---',
+      if (uid != null && uid.isNotEmpty) 'User ID: $uid',
+      if (packageInfo != null)
+        'App version/build: ${packageInfo.version}+${packageInfo.buildNumber}',
+      'Platform: $platform',
+    ];
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'support@facemeet.app',
+      queryParameters: {
+        'subject': 'FaceMeet Support Request',
+        'body': details.join('\n'),
+      },
+    );
+
+    try {
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open email app.',
+              style: GoogleFonts.dmSans(),
+            ),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('SUPPORT EMAIL: launch failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open email app.',
+              style: GoogleFonts.dmSans(),
+            ),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundDark,
+      body: FutureBuilder<Map<String, dynamic>?>(
+        future: _profileFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: AppTheme.primary),
+            );
+          }
+
+          final profile = snapshot.data;
+          if (profile == null) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: AppTheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading profile…',
+                    style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return _buildProfileContent(
+            MediaQuery.of(context).size.width >= 600,
+            profile,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildProfileContent(bool isTablet, Map<String, dynamic> profile) {
+    final firstName = profile['first_name'] ?? '';
+    final age = (profile['age'] as num?)?.toInt() ?? 0;
+    final city = profile['city'] ?? '';
+    final videoUrl = profile['profile_video_url'] ?? '';
+    final isVerified = profile['verification_status'] == 'verified';
+
+    if (isTablet) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 360,
+            child: ProfileVideoHeroWidget(
+              videoUrl: videoUrl,
+              name: firstName,
+              age: age,
+              city: city,
+              isVerified: isVerified,
+              onVideoUpdated: _refreshProfile,
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 32, 24, 120),
+              child: _buildInfoSection(profile),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProfileVideoHeroWidget(
+            videoUrl: videoUrl,
+            name: firstName,
+            age: age,
+            city: city,
+            isVerified: isVerified,
+            onVideoUpdated: _refreshProfile,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            child: _buildInfoSection(profile),
+          ),
+          const SizedBox(height: 140),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoSection(Map<String, dynamic> profile) {
+    final username = profile['username'] as String? ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Premium crown button
+        Padding(
+          padding: const EdgeInsets.only(top: 16, bottom: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pushNamed(context, AppRoutes.pricingScreen),
+            child: Container(
+              width: double.infinity,
+              height: 48,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFE8503A), Color(0xFFD43F27)],
+                ),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.workspace_premium_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Buy Sparks/Subscriptions',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // Username row — @username with edit pencil
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                username.isNotEmpty ? '@$username' : 'Set username',
+                style: GoogleFonts.outfit(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () => _showUsernameEditSheet(username),
+                child: const Icon(
+                  Icons.edit_rounded,
+                  color: Color(0xFFE8503A),
+                  size: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Stats row
+        _statsLoading
+            ? _buildStatsShimmer()
+            : ProfileStatsWidget(
+                sparkCount: _sparkCount ?? 0,
+                sessionCount: _sessionCount ?? 0,
+                matchCount: _matchCount ?? 0,
+              ),
+        const SizedBox(height: 20),
+
+        // Invite Friends card
+        _buildInviteFriendsCard(),
+        const SizedBox(height: 20),
+
+        _SectionCard(
+          title: 'About me',
+          trailing: _isEditing
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _cancelEdit(profile),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: _isSaving ? null : () => _toggleEdit(profile),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: AppTheme.primary,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              'Save',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                    ),
+                  ],
+                )
+              : GestureDetector(
+                  onTap: () => _toggleEdit(profile),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.edit_rounded,
+                        color: AppTheme.textMuted,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Edit',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+          child: ProfileEditBioWidget(
+            bio: _editBio,
+            isEditing: _isEditing,
+            onChanged: (v) => _editBio = v,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          title: 'Interests',
+          child: ProfileInterestsWidget(
+            interests: _editInterests,
+            isEditing: _isEditing,
+            onChanged: (interests) =>
+                setState(() => _editInterests = interests),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildCommunityGuidelinesCard(),
+        const SizedBox(height: 24),
+        _SectionCard(
+          title: 'Settings',
+          child: Column(
+            children: [
+              _SettingsRow(
+                icon: Icons.notifications_outlined,
+                label: 'Spark Session alerts',
+                trailing: Switch(
+                  value: true,
+                  onChanged: (_) {},
+                  activeThumbColor: AppTheme.primary,
+                  inactiveThumbColor: AppTheme.textMuted,
+                ),
+              ),
+              if (kIsWeb) ...[
+                Divider(color: AppTheme.borderGlass, height: 1),
+                _SettingsRow(
+                  icon: Icons.notifications_active_outlined,
+                  label: 'Notifications',
+                  onTap: () {
+                    debugPrint('WEB PUSH UI: settings opened');
+                    setState(
+                      () => _showNotificationSettings =
+                          !_showNotificationSettings,
+                    );
+                    if (_notificationState == null) _loadNotificationState();
+                  },
+                  trailing: Icon(
+                    _showNotificationSettings
+                        ? Icons.expand_less_rounded
+                        : Icons.chevron_right_rounded,
+                    color: AppTheme.textSecondary,
+                  ),
+                  subtitleBuilder: (_) => Text(
+                    _notificationState?.status ??
+                        'Enable alerts for Sparks, sessions, and messages.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+                if (_showNotificationSettings) ...[
+                  const SizedBox(height: 8),
+                  _buildWebNotificationSettingsCard(),
+                  const SizedBox(height: 8),
+                ],
+              ],
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.visibility_outlined,
+                label: 'Show online status',
+                trailing: Switch(
+                  value: true,
+                  onChanged: (_) {},
+                  activeThumbColor: AppTheme.primary,
+                  inactiveThumbColor: AppTheme.textMuted,
+                ),
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.event_available_rounded,
+                label: 'FaceMeet Events',
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTheme.textMuted,
+                  size: 20,
+                ),
+                subtitleBuilder: (_) => Text(
+                  'Request invite-only access to curated Dallas event drops.',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 12,
+                    color: AppTheme.textMuted,
+                  ),
+                ),
+                onTap: () => Navigator.pushNamed(context, AppRoutes.eventsScreen),
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.help_outline_rounded,
+                label: 'Help & Support',
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTheme.textMuted,
+                  size: 20,
+                ),
+                onTap: _openSupportEmail,
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.refresh_rounded,
+                label: 'Reset Discovery Feed',
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTheme.textMuted,
+                  size: 20,
+                ),
+                onTap: _handleResetDiscovery,
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.delete_forever_outlined,
+                label: 'Delete Account',
+                foregroundColor: AppTheme.error,
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTheme.error,
+                  size: 20,
+                ),
+                onTap: _showDeleteAccountFlow,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: _handleLogout,
+          child: Container(
+            height: 52,
+            decoration: BoxDecoration(
+              color: const Color(0x1AFF4458),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0x33FF4458), width: 1),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.logout_rounded,
+                  color: AppTheme.primary,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Sign out',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCommunityGuidelinesCard() {
+    const prohibitedItems = [
+      'nudity or sexual exploitation',
+      'harassment or hate',
+      'threats or abuse',
+      'child sexual abuse material or exploitation',
+      'fake or misleading profiles',
+      'illegal content',
+      'spam or scams',
+    ];
+
+    return _SectionCard(
+      title: 'Community Guidelines & Safety',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'FaceMeet has zero tolerance for objectionable content, harassment, abuse, exploitation, fake profiles, or unsafe behavior.',
+            style: GoogleFonts.dmSans(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+              height: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Users cannot post, upload, or send:',
+            style: GoogleFonts.dmSans(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...prohibitedItems.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.block_rounded,
+                    color: AppTheme.primary,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Use Report User or Block User from profile and chat screens when something feels unsafe.',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              color: AppTheme.textMuted,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebNotificationSettingsCard() {
+    final state =
+        _notificationState ??
+        const WebPushSetupResult(
+          success: false,
+          status: 'Enable Notifications',
+          message:
+              'Get notified when someone Sparks you, when a Spark Session is ready, and when chat unlocks.',
+        );
+    final isEnabled = state.success && state.status == 'Notifications enabled';
+    final isBlocked = state.status.toLowerCase().contains('blocked');
+    final canEnable =
+        !_notificationActionInProgress && !isEnabled && !isBlocked;
+    final canTest = !_notificationActionInProgress && isEnabled;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundVariant.withAlpha(235),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.borderGlass, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withAlpha(34),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.notifications_active_rounded,
+                  color: AppTheme.primary,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Enable FaceMeet Notifications',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Get notified when someone Sparks you, when a Mutual Spark is ready, and when chat unlocks.',
+            style: GoogleFonts.dmSans(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'On iPhone, notifications work after FaceMeet is added to your Home Screen and opened from the app icon.',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              color: AppTheme.textMuted,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'On Android, allow notifications so you do not miss Sparks, Spark Sessions, or new chats.',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              color: AppTheme.textMuted,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isEnabled
+                  ? AppTheme.sparkGreen.withAlpha(24)
+                  : AppTheme.surfaceGlass,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isEnabled
+                    ? AppTheme.sparkGreen.withAlpha(90)
+                    : AppTheme.borderGlass,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_notificationActionInProgress)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.primary,
+                    ),
+                  )
+                else
+                  Icon(
+                    isEnabled
+                        ? Icons.check_circle_rounded
+                        : isBlocked
+                        ? Icons.block_rounded
+                        : Icons.info_outline_rounded,
+                    color: isEnabled
+                        ? AppTheme.sparkGreen
+                        : isBlocked
+                        ? AppTheme.error
+                        : AppTheme.primary,
+                    size: 18,
+                  ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        state.status,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        state.message,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: canEnable ? _enableWebNotifications : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    disabledBackgroundColor: AppTheme.surfaceGlass,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  child: Text(
+                    isEnabled
+                        ? 'Notifications enabled'
+                        : 'Enable Notifications',
+                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: canTest ? _sendWebTestNotification : null,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: AppTheme.textMuted,
+                    minimumSize: const Size.fromHeight(48),
+                    side: BorderSide(color: AppTheme.borderGlass),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  child: Text(
+                    'Send Test',
+                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Invite Friends Card ──────────────────────────────────────────────────
+
+  Widget _buildInviteFriendsCard() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceGlass,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.borderGlass, width: 1),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(
+                    Icons.bolt_rounded,
+                    color: Color(0xFFE8503A),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Invite Friends — Earn Free Sparks',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textMuted,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              // Referral link pill
+              _referralLoading
+                  ? Container(
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1E),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    )
+                  : Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1E),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _referralLink,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 12,
+                                color: Colors.white70,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () {
+                              Clipboard.setData(
+                                ClipboardData(text: _referralLink),
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Link copied',
+                                    style: GoogleFonts.dmSans(),
+                                  ),
+                                  backgroundColor: AppTheme.sparkGreen,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            child: const Icon(
+                              Icons.copy_rounded,
+                              color: Color(0xFFE8503A),
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+              const SizedBox(height: 14),
+
+              // Share buttons row
+              Row(
+                children: [
+                  Expanded(
+                    child: _ShareButton(
+                      label: 'WhatsApp',
+                      color: const Color(0xFF25D366),
+                      icon: Icons.chat_rounded,
+                      onTap: _shareWhatsApp,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _ShareButton(
+                      label: 'SMS',
+                      color: const Color(0xFF555555),
+                      icon: Icons.sms_rounded,
+                      onTap: _shareSms,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _ShareButton(
+                      label: 'More',
+                      color: const Color(0xFF333338),
+                      icon: Icons.ios_share_rounded,
+                      onTap: _shareMore,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Invite Contacts button
+              GestureDetector(
+                onTap: _inviteContacts,
+                child: Container(
+                  width: double.infinity,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0x1AE8503A),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0x33E8503A),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.people_rounded,
+                        color: Color(0xFFE8503A),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Invite Contacts',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFFE8503A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Stats line
+              _referralLoading
+                  ? const SizedBox.shrink()
+                  : Text(
+                      'Friends invited: $_friendsCount · Sparks earned: $_sparksEarned',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                      ),
+                    ),
+              const SizedBox(height: 6),
+
+              // Earn info line
+              Text(
+                'Earn 1 Spark per friend who joins. Earn 3 bonus Sparks when they upgrade.',
+                style: GoogleFonts.dmSans(
+                  fontSize: 12,
+                  color: const Color(0xFFE8503A),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsShimmer() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceGlass,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.borderGlass, width: 1),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Row(
+            children: [
+              Expanded(child: _ShimmerStatItem()),
+              Container(width: 1, height: 40, color: AppTheme.borderGlass),
+              Expanded(child: _ShimmerStatItem()),
+              Container(width: 1, height: 40, color: AppTheme.borderGlass),
+              Expanded(child: _ShimmerStatItem()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Delete Account Confirmation Sheet ───────────────────────────────────────
+
+class _DeleteAccountConfirmationSheet extends StatefulWidget {
+  final Future<void> Function() onConfirmed;
+
+  const _DeleteAccountConfirmationSheet({required this.onConfirmed});
+
+  @override
+  State<_DeleteAccountConfirmationSheet> createState() =>
+      _DeleteAccountConfirmationSheetState();
+}
+
+class _DeleteAccountConfirmationSheetState
+    extends State<_DeleteAccountConfirmationSheet> {
+  final TextEditingController _controller = TextEditingController();
+  bool _isDeleting = false;
+
+  bool get _canDelete => _controller.text.trim().toUpperCase() == 'DELETE';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _delete() async {
+    if (!_canDelete || _isDeleting) return;
+    setState(() => _isDeleting = true);
+    try {
+      await widget.onConfirmed();
+    } catch (e) {
+      debugPrint('ACCOUNT DELETE: UI deletion failed — $e');
+      if (!mounted) return;
+      setState(() => _isDeleting = false);
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Account deletion failed: $message',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.error,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A1E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.borderGlass,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  color: AppTheme.error,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Final confirmation',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Type DELETE to permanently delete your account. You will be signed out and returned to the login screen.',
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _controller,
+              enabled: !_isDeleting,
+              textCapitalization: TextCapitalization.characters,
+              style: GoogleFonts.dmSans(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
+              decoration: InputDecoration(
+                hintText: 'DELETE',
+                hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                filled: true,
+                fillColor: const Color(0xFF0D0D0F),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _canDelete && !_isDeleting ? _delete : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                  disabledBackgroundColor: const Color(0xFF333338),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isDeleting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Text(
+                        'Delete My Account',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: TextButton(
+                onPressed: _isDeleting ? null : () => Navigator.pop(context),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Username Edit Bottom Sheet ───────────────────────────────────────────────
+
+class _UsernameEditSheet extends StatefulWidget {
+  final String currentUsername;
+  final void Function(String) onSaved;
+
+  const _UsernameEditSheet({
+    required this.currentUsername,
+    required this.onSaved,
+  });
+
+  @override
+  State<_UsernameEditSheet> createState() => _UsernameEditSheetState();
+}
+
+class _UsernameEditSheetState extends State<_UsernameEditSheet> {
+  late TextEditingController _ctrl;
+  bool? _isAvailable;
+  bool _checking = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.currentUsername);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkAvailability(String value) async {
+    if (value.trim().isEmpty) {
+      setState(() => _isAvailable = null);
+      return;
+    }
+    setState(() => _checking = true);
+    final available = await ReferralService.instance.isUsernameAvailable(value);
+    if (mounted) {
+      setState(() {
+        _isAvailable = available;
+        _checking = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    final username = _ctrl.text.trim();
+    if (username.isEmpty || _isAvailable == false) return;
+    setState(() => _saving = true);
+    try {
+      await ReferralService.instance.updateUsername(username);
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onSaved(username);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Username updated', style: GoogleFonts.dmSans()),
+            backgroundColor: AppTheme.sparkGreen,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save: $e', style: GoogleFonts.dmSans()),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A1E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.borderGlass,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Edit Username',
+              style: GoogleFonts.dmSans(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              style: GoogleFonts.dmSans(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Enter username',
+                hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                filled: true,
+                fillColor: const Color(0xFF0D0D0F),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                suffixIcon: _checking
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                      )
+                    : _isAvailable == null
+                    ? null
+                    : Icon(
+                        _isAvailable!
+                            ? Icons.check_circle_rounded
+                            : Icons.cancel_rounded,
+                        color: _isAvailable!
+                            ? AppTheme.sparkGreen
+                            : AppTheme.error,
+                      ),
+              ),
+              onChanged: (v) {
+                setState(() => _isAvailable = null);
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (_ctrl.text == v) _checkAvailability(v);
+                });
+              },
+            ),
+            if (_isAvailable == false) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Already taken',
+                style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.error),
+              ),
+            ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: (_saving || _isAvailable == false) ? null : _save,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE8503A),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Text(
+                        'Save',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Contacts Invite Sheet ────────────────────────────────────────────────────
+
+class _ContactsInviteSheet extends StatefulWidget {
+  final List<Contact> contacts;
+  final String shareMessage;
+
+  const _ContactsInviteSheet({
+    required this.contacts,
+    required this.shareMessage,
+  });
+
+  @override
+  State<_ContactsInviteSheet> createState() => _ContactsInviteSheetState();
+}
+
+class _ContactsInviteSheetState extends State<_ContactsInviteSheet> {
+  final Set<int> _selected = {};
+  String _search = '';
+
+  List<Contact> get _filtered {
+    if (_search.isEmpty) return widget.contacts;
+    final q = _search.toLowerCase();
+    return widget.contacts
+        .where((c) => c.displayName.toLowerCase().contains(q))
+        .toList();
+  }
+
+  Future<void> _sendInvites() async {
+    Navigator.pop(context);
+    await Share.share(widget.shareMessage, subject: 'Join me on FaceMeet');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      minChildSize: 0.5,
+      expand: false,
+      builder: (_, scrollCtrl) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A1E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.borderGlass,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Column(
+                children: [
+                  Text(
+                    'Invite Contacts',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    style: GoogleFonts.dmSans(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Search contacts…',
+                      hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: AppTheme.textMuted,
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFF0D0D0F),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (v) => setState(() => _search = v),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: _filtered.length,
+                itemBuilder: (_, i) {
+                  final contact = _filtered[i];
+                  final isSelected = _selected.contains(i);
+                  return CheckboxListTile(
+                    value: isSelected,
+                    onChanged: (v) {
+                      setState(() {
+                        if (v == true) {
+                          _selected.add(i);
+                        } else {
+                          _selected.remove(i);
+                        }
+                      });
+                    },
+                    title: Text(
+                      contact.displayName,
+                      style: GoogleFonts.dmSans(color: Colors.white),
+                    ),
+                    activeColor: const Color(0xFFE8503A),
+                    checkColor: Colors.white,
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _selected.isEmpty ? null : _sendInvites,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE8503A),
+                    disabledBackgroundColor: const Color(0xFF333338),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(
+                    _selected.isEmpty
+                        ? 'Send Invites'
+                        : 'Send Invites (${_selected.length})',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Share Button ─────────────────────────────────────────────────────────────
+
+class _ShareButton extends StatelessWidget {
+  final String label;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _ShareButton({
+    required this.label,
+    required this.color,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: GoogleFonts.dmSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Shimmer / Section helpers (unchanged) ────────────────────────────────────
+
+class _ShimmerStatItem extends StatefulWidget {
+  @override
+  State<_ShimmerStatItem> createState() => _ShimmerStatItemState();
+}
+
+class _ShimmerStatItemState extends State<_ShimmerStatItem>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.3, end: 0.7).animate(_ctrl);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) => Column(
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(_anim.value * 0.3),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: 32,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(_anim.value * 0.4),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: 56,
+            height: 10,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(_anim.value * 0.2),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+
+  const _SectionCard({required this.title, required this.child, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceGlass,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.borderGlass, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textMuted,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (trailing != null) trailing!,
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: child,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Widget trailing;
+  final VoidCallback? onTap;
+  final Color? foregroundColor;
+  final WidgetBuilder? subtitleBuilder;
+
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.trailing,
+    this.onTap,
+    this.foregroundColor,
+    this.subtitleBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: foregroundColor ?? AppTheme.textSecondary,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      color: foregroundColor ?? Colors.white,
+                    ),
+                  ),
+                  if (subtitleBuilder != null) ...[
+                    const SizedBox(height: 4),
+                    subtitleBuilder!(context),
+                  ],
+                ],
+              ),
+            ),
+            trailing,
+          ],
+        ),
+      ),
+    );
+  }
+}

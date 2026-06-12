@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "200342512834",
+    "project_id": "facemeet-bc3cb",
+    "storage_bucket": "facemeet-bc3cb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:200342512834:android:21a706fce5079667a1c75b",
+        "android_client_info": {
+          "package_name": "com.facemeet.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAajKxGuDJcKzLYPj4sOtuilk6IHS9D0T0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:200342512834:android:4fe8b8dab890b299a1c75b",
+        "android_client_info": {
+          "package_name": "com.ononobi.facemeet"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAajKxGuDJcKzLYPj4sOtuilk6IHS9D0T0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

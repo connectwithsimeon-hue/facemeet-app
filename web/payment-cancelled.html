@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F4513E" />
+    <title>Payment Cancelled | FaceMeet</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --coral: #f4513e;
+        --ink: #fff8f2;
+        --muted: #b8aaa2;
+        --bg: #050202;
+        --panel: rgba(28, 18, 15, 0.92);
+        --border: rgba(244, 81, 62, 0.36);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at top, rgba(244, 81, 62, 0.18), transparent 34rem),
+          linear-gradient(180deg, #120805 0%, var(--bg) 100%);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(100%, 460px);
+        padding: 32px;
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        background: var(--panel);
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      img {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        object-fit: cover;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(244, 81, 62, 0.13);
+        color: var(--coral);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(30px, 8vw, 40px);
+        line-height: 1.06;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      (function () {
+        try {
+          window.sessionStorage.removeItem("facemeet_checkout_in_progress");
+          window.sessionStorage.removeItem("facemeet_checkout_started_at");
+          window.localStorage.removeItem("facemeet_checkout_in_progress");
+          window.localStorage.removeItem("facemeet_checkout_started_at");
+          console.info("STRIPE RETURN: flag cleared");
+        } catch (_) {}
+      })();
+    </script>
+    <main>
+      <div class="brand">
+        <img src="icons/apple-touch-icon.png" alt="FaceMeet" />
+        <strong>FaceMeet</strong>
+      </div>
+      <div class="status">Checkout closed</div>
+      <h1>Payment cancelled</h1>
+      <p>No charge was made. You can close this page and return to FaceMeet.</p>
+    </main>
+  </body>
+</html>

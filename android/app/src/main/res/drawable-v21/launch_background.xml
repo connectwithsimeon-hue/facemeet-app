@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FaceMeet splash screen: dark navy background with centered logo -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Dark navy background -->
+    <item android:drawable="@color/splash_background" />
+
+    <!-- FaceMeet logo centered and large -->
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher" />
+    </item>
+</layer-list>

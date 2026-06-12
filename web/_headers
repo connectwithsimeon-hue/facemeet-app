@@ -1,0 +1,11 @@
+/index.html
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
+/flutter_bootstrap.js
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
+/main.dart.js
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
+/flutter_service_worker.js
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0

@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base href="$FLUTTER_BASE_HREF" />
+
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta content="IE=Edge" http-equiv="X-UA-Compatible" />
+    <meta
+      name="description"
+      content="FaceMeet is the video-first dating app with real video profiles, Mutual Sparks, and 3-minute Spark Dates."
+    />
+    <meta name="theme-color" content="#F4513E" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- iOS meta tags & icons -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FaceMeet" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="favicon.png" />
+
+    <title>FaceMeet</title>
+    <link rel="manifest" href="manifest.json" />
+
+    <style>
+      html,
+      body {
+        background: #000;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        position: fixed;
+        inset: 0;
+        touch-action: manipulation;
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+      }
+
+      body,
+      flutter-view,
+      flt-glass-pane,
+      flt-scene-host,
+      flt-semantics-host,
+      canvas {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        position: fixed;
+        inset: 0;
+        touch-action: manipulation;
+        transform: none !important;
+      }
+
+      #loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100dvh;
+        background-color: black;
+        pointer-events: none;
+      }
+
+      .loader {
+        border: 6px solid rgba(255, 255, 255, 0.2);
+        border-top: 6px solid #87ceeb;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      #load-error {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100dvh;
+        background-color: black;
+        color: #ccc;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        padding: 24px;
+        box-sizing: border-box;
+        pointer-events: auto;
+      }
+
+      #load-error.visible {
+        display: flex;
+      }
+
+      #load-error h2 {
+        color: #87ceeb;
+        margin: 0 0 12px;
+        font-size: 1.25rem;
+      }
+
+      #load-error pre {
+        background: #1a1a1a;
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+        max-width: 90%;
+        font-size: 12px;
+        text-align: left;
+      }
+
+      #pwa-install-card {
+        position: fixed;
+        left: max(16px, env(safe-area-inset-left));
+        right: max(16px, env(safe-area-inset-right));
+        bottom: max(16px, env(safe-area-inset-bottom));
+        z-index: 9999;
+        display: none;
+        pointer-events: none;
+        gap: 14px;
+        align-items: center;
+        max-width: 560px;
+        margin: 0 auto;
+        padding: 16px;
+        border: 1px solid rgba(244, 81, 62, 0.45);
+        border-radius: 22px;
+        background: linear-gradient(135deg, rgba(20, 8, 7, 0.98), rgba(8, 3, 2, 0.96));
+        color: #fffaf4;
+        box-shadow: 0 22px 70px rgba(0, 0, 0, 0.48);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      #pwa-install-card.visible {
+        display: flex;
+        pointer-events: auto;
+      }
+
+      #pwa-install-card img {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        flex: 0 0 auto;
+      }
+
+      #pwa-install-card h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      #pwa-install-card p {
+        margin: 0;
+        color: rgba(255, 250, 244, 0.72);
+        font-size: 13px;
+        line-height: 1.42;
+      }
+
+      #pwa-install-card .pwa-copy {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      #pwa-install-card .pwa-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+
+      #pwa-install-card button {
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 14px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      #pwa-install-action {
+        background: #f4513e;
+        color: white;
+      }
+
+      #pwa-install-dismiss {
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 250, 244, 0.76);
+      }
+
+      @media (max-width: 560px) {
+        #pwa-install-card {
+          align-items: flex-start;
+        }
+
+        #pwa-install-card .pwa-actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        #pwa-install-card button {
+          padding: 10px 12px;
+          white-space: nowrap;
+        }
+      }
+
+      #pwa-reload-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at 50% 35%, rgba(244, 81, 62, 0.2), transparent 34%),
+          #050302;
+        color: #fffaf4;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+
+      #pwa-reload-overlay.visible {
+        display: flex;
+      }
+
+      #pwa-reload-overlay .pwa-reload-card {
+        max-width: 320px;
+        padding: 28px;
+        border: 1px solid rgba(244, 81, 62, 0.34);
+        border-radius: 24px;
+        background: rgba(20, 8, 7, 0.92);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+      }
+
+      #pwa-reload-overlay h2 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+
+      #pwa-reload-overlay p {
+        margin: 0;
+        color: rgba(255, 250, 244, 0.72);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loader Container -->
+    <div id="loading-container">
+      <div class="loader"></div>
+    </div>
+
+    <!-- Shown when a startup error occurs -->
+    <div id="load-error">
+      <h2>Something went wrong</h2>
+      <p>The app couldn’t initialize properly due to a code-related issue</p>
+    </div>
+
+    <div id="pwa-reload-overlay" aria-live="assertive">
+      <div class="pwa-reload-card">
+        <h2>Reloading FaceMeet…</h2>
+        <p>Restoring the app so taps work correctly.</p>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        function cleanReferralCode(value) {
+          if (!value || typeof value !== "string") return "";
+          return value.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+        }
+
+        function writeReferralCookie(code) {
+          try {
+            document.cookie =
+              "facemeet_pending_referral_code=" +
+              encodeURIComponent(code) +
+              "; path=/; max-age=" +
+              60 * 60 * 24 * 14 +
+              "; SameSite=Lax";
+          } catch (_) {}
+        }
+
+        function captureReferralCode() {
+          try {
+            var url = new URL(window.location.href);
+            var code = cleanReferralCode(url.searchParams.get("ref") || "");
+            if (!code && url.pathname.indexOf("/join/") === 0) {
+              code = cleanReferralCode(url.pathname.split("/")[2] || "");
+            }
+            if (!code) return;
+
+            window.localStorage.setItem("pending_referral_code", code);
+            window.localStorage.setItem("flutter.pending_referral_code", code);
+            window.sessionStorage.setItem("pending_referral_code", code);
+            writeReferralCookie(code);
+            console.info("REFERRAL: captured launch referral code yes");
+          } catch (error) {
+            console.info("REFERRAL: launch referral capture failed");
+          }
+        }
+
+        captureReferralCode();
+      })();
+    </script>
+
+    <script>
+      (function () {
+        window.parent.postMessage({ type: "LOADING_STARTED" }, "*");
+      })();
+    </script>
+
+    <script>
+      (function () {
+        var deferredInstallPrompt = null;
+        var continueInBrowserKey = "facemeet_continue_in_mobile_browser";
+
+        function cleanReferralCode(value) {
+          if (!value || typeof value !== "string") return "";
+          return value.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+        }
+
+        function readCookie(name) {
+          try {
+            var prefix = name + "=";
+            var parts = document.cookie ? document.cookie.split(";") : [];
+            for (var i = 0; i < parts.length; i += 1) {
+              var part = parts[i].trim();
+              if (part.indexOf(prefix) === 0) {
+                return decodeURIComponent(part.substring(prefix.length));
+              }
+            }
+          } catch (_) {}
+          return "";
+        }
+
+        function getPendingReferralCode() {
+          try {
+            return cleanReferralCode(
+              window.sessionStorage.getItem("pending_referral_code") ||
+              window.localStorage.getItem("pending_referral_code") ||
+              window.localStorage.getItem("flutter.pending_referral_code") ||
+              readCookie("facemeet_pending_referral_code") ||
+              ""
+            );
+          } catch (_) {
+            return cleanReferralCode(
+              readCookie("facemeet_pending_referral_code") || ""
+            );
+          }
+        }
+
+        function isStandalone() {
+          return (
+            window.matchMedia("(display-mode: standalone)").matches ||
+            window.navigator.standalone === true
+          );
+        }
+
+        function isIos() {
+          var ua = window.navigator.userAgent || "";
+          return /iphone|ipad|ipod/i.test(ua);
+        }
+
+        function isAndroid() {
+          return /android/i.test(window.navigator.userAgent || "");
+        }
+
+        function isMobile() {
+          var ua = window.navigator.userAgent || "";
+          return /android|iphone|ipad|ipod|mobile/i.test(ua);
+        }
+
+        function shouldContinueInBrowser() {
+          try {
+            return window.sessionStorage.getItem(continueInBrowserKey) === "true";
+          } catch (_) {
+            return false;
+          }
+        }
+
+        window.addEventListener("beforeinstallprompt", function (event) {
+          event.preventDefault();
+          deferredInstallPrompt = event;
+          try {
+            window.dispatchEvent(
+              new CustomEvent("facemeet:install-prompt-ready")
+            );
+          } catch (_) {}
+        });
+
+        window.addEventListener("appinstalled", function () {
+          try {
+            window.sessionStorage.removeItem(continueInBrowserKey);
+          } catch (_) {}
+          deferredInstallPrompt = null;
+        });
+
+        window.facemeetGetInstallContext = function () {
+          return Promise.resolve({
+            isMobile: isMobile(),
+            isStandalone: isStandalone(),
+            isIos: isIos(),
+            isAndroid: isAndroid(),
+            canPromptInstall: !!deferredInstallPrompt,
+            continueInBrowser: shouldContinueInBrowser(),
+            pendingReferralCode: getPendingReferralCode(),
+          });
+        };
+
+        window.facemeetGetPendingReferralCode = function () {
+          return Promise.resolve(getPendingReferralCode());
+        };
+
+        window.facemeetPromptInstall = function () {
+          if (!deferredInstallPrompt) {
+            return Promise.resolve({
+              prompted: false,
+              outcome: "unavailable",
+            });
+          }
+
+          var prompt = deferredInstallPrompt;
+          return prompt.prompt().then(function () {
+            return prompt.userChoice;
+          }).then(function (choice) {
+            if (choice && choice.outcome === "accepted") {
+              return { prompted: true, outcome: "accepted" };
+            }
+            return { prompted: true, outcome: "dismissed" };
+          }).catch(function () {
+            return { prompted: false, outcome: "failed" };
+          }).finally(function () {
+            deferredInstallPrompt = null;
+          });
+        };
+
+        window.facemeetAllowContinueInBrowser = function () {
+          try {
+            window.sessionStorage.setItem(continueInBrowserKey, "true");
+          } catch (_) {}
+        };
+      })();
+    </script>
+
+    <script>
+      (function () {
+        var resumeReloadKey = "facemeet_ios_pwa_resume_reload_at";
+        var backgroundedKey = "facemeet_ios_pwa_backgrounded_at";
+        var lastRepairKey = "facemeet_ios_pwa_last_resume_repair_at";
+        var reloadGuardMs = 45000;
+        var longBackgroundMs = 120000;
+        var hiddenAt = 0;
+
+        function isIosDevice() {
+          var ua = window.navigator.userAgent || "";
+          var platform = window.navigator.platform || "";
+          var touchMac =
+            platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
+          return /iphone|ipad|ipod/i.test(ua) || touchMac;
+        }
+
+        function isStandalonePwa() {
+          return (
+            window.navigator.standalone === true ||
+            window.matchMedia("(display-mode: standalone)").matches
+          );
+        }
+
+        function isIosStandalonePwa() {
+          return isIosDevice() && isStandalonePwa();
+        }
+
+        function safeSessionGet(key) {
+          try {
+            return window.sessionStorage.getItem(key);
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function safeSessionSet(key, value) {
+          try {
+            window.sessionStorage.setItem(key, value);
+          } catch (_) {}
+        }
+
+        function safeSessionRemove(key) {
+          try {
+            window.sessionStorage.removeItem(key);
+          } catch (_) {}
+        }
+
+        function safeLocalGet(key) {
+          try {
+            return window.localStorage.getItem(key);
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function safeLocalSet(key, value) {
+          try {
+            window.localStorage.setItem(key, value);
+          } catch (_) {}
+        }
+
+        function safeLocalRemove(key) {
+          try {
+            window.localStorage.removeItem(key);
+          } catch (_) {}
+        }
+
+        function clearStripeCheckoutFlags() {
+          safeSessionRemove("facemeet_checkout_in_progress");
+          safeSessionRemove("facemeet_checkout_started_at");
+          safeLocalRemove("facemeet_checkout_in_progress");
+          safeLocalRemove("facemeet_checkout_started_at");
+          console.info("STRIPE RETURN: flag cleared");
+        }
+
+        function maybeReloadAfterStripeReturn(source) {
+          var checkoutFlag =
+            safeSessionGet("facemeet_checkout_in_progress") ||
+            safeLocalGet("facemeet_checkout_in_progress");
+          if (checkoutFlag !== "true") {
+            console.info(
+              "STRIPE RETURN: reload skipped reason=no_checkout_flag source=" +
+                source,
+            );
+            return false;
+          }
+
+          console.info("STRIPE RETURN: flag detected source=" + source);
+
+          var startedAt = Number(
+            safeSessionGet("facemeet_checkout_started_at") ||
+              safeLocalGet("facemeet_checkout_started_at") ||
+              "0",
+          );
+          var now = Date.now();
+          var checkoutAgeMs = startedAt ? now - startedAt : 0;
+          var maxCheckoutAgeMs = 30 * 60 * 1000;
+          if (!startedAt || checkoutAgeMs < 0 || checkoutAgeMs > maxCheckoutAgeMs) {
+            clearStripeCheckoutFlags();
+            console.info(
+              "STRIPE RETURN: reload skipped reason=checkout_flag_expired",
+            );
+            return false;
+          }
+
+          var lastReloadAt = Number(
+            safeSessionGet("facemeet_checkout_reloaded_at") || "0",
+          );
+          if (lastReloadAt && now - lastReloadAt < 10000) {
+            clearStripeCheckoutFlags();
+            console.info(
+              "STRIPE RETURN: reload skipped reason=reload_guard",
+            );
+            return false;
+          }
+
+          safeSessionSet("facemeet_checkout_reloaded_at", String(now));
+          clearStripeCheckoutFlags();
+          console.info("STRIPE RETURN: controlled reload triggered");
+          window.location.replace(window.location.href);
+          return true;
+        }
+
+        function showReloadOverlay() {
+          var overlay = document.getElementById("pwa-reload-overlay");
+          if (overlay) overlay.classList.add("visible");
+        }
+
+        function hideReloadOverlay() {
+          var overlay = document.getElementById("pwa-reload-overlay");
+          if (overlay) overlay.classList.remove("visible");
+        }
+
+        function repairViewportSilently(source) {
+          var viewport = window.visualViewport;
+          var height = Math.round(
+            (viewport && viewport.height) || window.innerHeight || 0,
+          );
+          var width = Math.round(
+            (viewport && viewport.width) || window.innerWidth || 0,
+          );
+
+          console.info(
+            "PWA RECOVERY: silent repair source=" + source,
+          );
+          console.info(
+            "PWA REPAIR: visualViewport height/offset source=" +
+              source +
+              " height=" +
+              (viewport ? viewport.height : "none") +
+              " offsetTop=" +
+              (viewport ? viewport.offsetTop : "none"),
+          );
+          console.info(
+            "PWA FIX: viewport diagnostic source=" +
+              source +
+              " innerHeight=" +
+              window.innerHeight +
+              " visualViewportHeight=" +
+              (viewport ? viewport.height : "none") +
+              " visualViewportOffsetTop=" +
+              (viewport ? viewport.offsetTop : "none") +
+              " docClientHeight=" +
+              document.documentElement.clientHeight +
+              " bodyClientHeight=" +
+              document.body.clientHeight +
+              " scrollY=" +
+              window.scrollY +
+              " dpr=" +
+              window.devicePixelRatio +
+              " standalone=" +
+              isStandalonePwa(),
+          );
+
+          if (isIosStandalonePwa()) {
+            if (height > 0) {
+              document.documentElement.style.height = height + "px";
+              document.body.style.height = height + "px";
+              document.documentElement.style.minHeight = height + "px";
+              document.body.style.minHeight = height + "px";
+            }
+            if (width > 0) {
+              document.documentElement.style.width = width + "px";
+              document.body.style.width = width + "px";
+            }
+
+            document.documentElement.style.position = "fixed";
+            document.documentElement.style.inset = "0";
+            document.body.style.position = "fixed";
+            document.body.style.inset = "0";
+            document.body.style.overflow = "hidden";
+          }
+
+          window.scrollTo(0, 0);
+          void document.documentElement.clientHeight;
+          void document.body.clientHeight;
+          window.dispatchEvent(new Event("resize"));
+          console.info("PWA REPAIR: resize dispatched source=" + source);
+          window.setTimeout(function () {
+            window.scrollTo(0, 0);
+            window.dispatchEvent(new Event("resize"));
+            console.info(
+              "PWA REPAIR: resize dispatched source=" + source + "-followup",
+            );
+          }, 160);
+
+          safeSessionSet(lastRepairKey, String(Date.now()));
+        }
+
+        function dispatchExternalReturnRepair(source) {
+          console.info(
+            "PWA REPAIR: external-return-repair dispatched source=" +
+              source,
+          );
+          window.dispatchEvent(
+            new CustomEvent("facemeet:external-return-repair", {
+              detail: { source: source },
+            }),
+          );
+        }
+
+        function scheduleExternalReturnRepair(source) {
+          var delays = [0, 150, 500, 1000];
+          delays.forEach(function (delay, index) {
+            window.setTimeout(function () {
+              var passSource = source + "-pass-" + index;
+              console.info(
+                "PWA REPAIR: external return pass index/time=" +
+                  index +
+                  "/" +
+                  delay +
+                  " source=" +
+                  source,
+              );
+              repairViewportSilently(passSource);
+              dispatchExternalReturnRepair(passSource);
+            }, delay);
+          });
+        }
+
+        function cleanupServiceWorkers() {
+          if (!("serviceWorker" in navigator)) return;
+
+          navigator.serviceWorker.getRegistrations().then(function (registrations) {
+            var foundPushWorker = false;
+            var foundFlutterWorker = false;
+            var unregisterPromises = [];
+
+            registrations.forEach(function (registration) {
+              var scriptURL =
+                (registration.active && registration.active.scriptURL) ||
+                (registration.waiting && registration.waiting.scriptURL) ||
+                (registration.installing && registration.installing.scriptURL) ||
+                "";
+              var isPushWorker =
+                scriptURL.indexOf("facemeet_web_push_sw.js") !== -1;
+              var isOldScopedPushWorker =
+                isPushWorker && registration.scope.indexOf("/web-push/") !== -1;
+              var isFlutterWorker =
+                scriptURL.indexOf("flutter_service_worker.js") !== -1;
+
+              if (isOldScopedPushWorker) {
+                foundPushWorker = true;
+                unregisterPromises.push(registration.unregister());
+              } else if (isPushWorker) {
+                foundPushWorker = true;
+                console.info("WEB PUSH: root push worker preserved");
+              } else if (isIosStandalonePwa() && isFlutterWorker) {
+                foundFlutterWorker = true;
+                unregisterPromises.push(registration.unregister());
+              }
+            });
+
+            console.info(
+              "WEB PUSH DISABLED: old push worker found yes/no=" +
+                foundPushWorker,
+            );
+            console.info(
+              "PWA FIX: service worker found push=" +
+                foundPushWorker +
+                " flutter=" +
+                foundFlutterWorker,
+            );
+
+            if (!isIosStandalonePwa()) {
+              console.info(
+                "PWA FIX: flutter service worker cleanup skipped/done=skipped",
+              );
+            }
+
+            Promise.allSettled(unregisterPromises).then(function (results) {
+              var unregistered = results.some(function (result) {
+                return result.status === "fulfilled" && result.value === true;
+              });
+              console.info(
+                "WEB PUSH DISABLED: old push worker unregistered yes/no=" +
+                  unregistered,
+              );
+              console.info(
+                "PWA FIX: service worker unregistered yes/no=" +
+                  unregistered,
+              );
+              if (isIosStandalonePwa()) {
+                console.info(
+                  "PWA FIX: flutter service worker cleanup skipped/done=done",
+                );
+              }
+            });
+          });
+        }
+
+        function markBackgrounded(source) {
+          if (!isIosStandalonePwa()) return;
+          hiddenAt = Date.now();
+          safeLocalSet(backgroundedKey, String(hiddenAt));
+          console.info("PWA FIX: pagehide/background marker set source=" + source);
+        }
+
+        function hardReloadWithOverlay(reason) {
+          if (!isIosStandalonePwa()) return;
+
+          repairViewportSilently("before-hard-reload-" + reason);
+          console.info("PWA RECOVERY: reload needed reason=" + reason);
+          console.info(
+            "PWA RECOVERY: hard reload disabled for video stability test",
+          );
+          safeLocalRemove(backgroundedKey);
+          hiddenAt = 0;
+        }
+
+        function handleResume(source, options) {
+          if (maybeReloadAfterStripeReturn(source)) return;
+
+          if (!isIosStandalonePwa()) {
+            scheduleExternalReturnRepair(source);
+            return;
+          }
+          options = options || {};
+          var storedHiddenAt = Number(safeLocalGet(backgroundedKey) || "0");
+          var effectiveHiddenAt = hiddenAt || storedHiddenAt;
+          if (!effectiveHiddenAt && !options.persisted) {
+            scheduleExternalReturnRepair(source);
+            return;
+          }
+
+          if (source === "pageshow") {
+            console.info("PWA RECOVERY: pageshow resume detected");
+          } else {
+            console.info("PWA RECOVERY: visibility resume detected source=" + source);
+          }
+
+          scheduleExternalReturnRepair(source);
+
+          var now = Date.now();
+          var hiddenDuration = effectiveHiddenAt ? now - effectiveHiddenAt : 0;
+          if (options.persisted) {
+            hardReloadWithOverlay("pageshow-persisted");
+          } else if (hiddenDuration >= longBackgroundMs) {
+            hardReloadWithOverlay("long-background-" + hiddenDuration);
+          } else {
+            console.info(
+              "PWA RECOVERY: reload skipped after silent repair hiddenMs=" +
+                hiddenDuration,
+            );
+            hiddenAt = 0;
+            safeLocalRemove(backgroundedKey);
+          }
+        }
+
+        console.info("WEB PUSH DISABLED: startup push disabled");
+        hideReloadOverlay();
+        if (isIosStandalonePwa()) {
+          console.info("PWA FIX: iOS standalone detected");
+          repairViewportSilently("startup");
+        }
+        cleanupServiceWorkers();
+        try {
+          window.localStorage.removeItem("facemeet_web_push_prompt_dismissed");
+        } catch (_) {}
+
+        if (isIosStandalonePwa() && safeLocalGet(backgroundedKey)) {
+          console.info("PWA RECOVERY: pageshow resume detected");
+          handleResume("boot-background-marker");
+        }
+
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "hidden") {
+            markBackgrounded("visibilitychange");
+            return;
+          }
+          if (document.visibilityState === "visible") {
+            handleResume("visibilitychange");
+          }
+        });
+
+        window.addEventListener("pagehide", function () {
+          markBackgrounded("pagehide");
+        });
+
+        window.addEventListener("pageshow", function (event) {
+          handleResume("pageshow", { persisted: event.persisted });
+        });
+
+        window.addEventListener("blur", function () {
+          markBackgrounded("blur");
+        });
+
+        window.addEventListener("focus", function () {
+          handleResume("focus");
+        });
+
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", function () {
+            repairViewportSilently("visualViewport-resize");
+          });
+          window.visualViewport.addEventListener("scroll", function () {
+            repairViewportSilently("visualViewport-scroll");
+          });
+        }
+      })();
+    </script>
+
+    <script src="facemeet_web_push.js" defer></script>
+    <script src="flutter_bootstrap.js" async></script>
+
+    <script>
+      var appLoaded = false;
+
+      function removeLoader() {
+        var loader = document.getElementById("loading-container");
+        if (loader) {
+          loader.style.display = "none";
+        }
+      }
+
+      function showLoadError(message, detail) {
+        if (appLoaded) return;
+        appLoaded = true;
+        removeLoader();
+        var errEl = document.getElementById("load-error");
+        if (errEl) {
+          errEl.classList.add("visible");
+        }
+        window.parent.postMessage(
+          { type: "LOADING_ERROR", message: message },
+          "*",
+        );
+        window.parent.postMessage({ type: "LOADING_COMPLETED" }, "*");
+      }
+
+      window.addEventListener("flutter-first-frame", function () {
+        if (appLoaded) return;
+        appLoaded = true;
+        removeLoader();
+        window.parent.postMessage({ type: "LOADING_COMPLETED" }, "*");
+      });
+
+      window.onerror = function (message, source, lineno, colno, error) {
+        var detail = [
+          message,
+          source ? source + ":" + lineno + ":" + colno : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        if (error && error.stack) detail += "\n" + error.stack;
+        showLoadError(message, detail);
+        return false;
+      };
+
+      window.addEventListener("unhandledrejection", function (event) {
+        var reason = event.reason;
+        var msg = reason && (reason.message || String(reason));
+        var stack = reason && reason.stack;
+        showLoadError(
+          msg || "Unhandled error",
+          stack && stack !== msg ? stack : null,
+        );
+      });
+
+      // If first frame or error does not happen within 90s, stop loader and show message
+      setTimeout(function () {
+        if (appLoaded) return;
+        var loader = document.getElementById("loading-container");
+        if (loader && loader.style.display !== "none") {
+          showLoadError(
+            "Loading timed out",
+            "The app did not start in time. Please refresh the page.",
+          );
+        }
+      }, 90000);
+    </script>
+
+    <script>
+      // Navigation tracking
+      (function (history) {
+        const pushState = history.pushState;
+        const replaceState = history.replaceState;
+
+        function logNavigation(method, url) {
+          window.parent.postMessage({ type: "NAVIGATION", method, url }, "*");
+        }
+
+        history.pushState = function (state, title, url) {
+          logNavigation("pushState", url);
+          return pushState.apply(history, arguments);
+        };
+
+        history.replaceState = function (state, title, url) {
+          logNavigation("replaceState", url);
+          return replaceState.apply(history, arguments);
+        };
+
+        window.addEventListener("popstate", function (event) {
+          logNavigation("popstate", location.href);
+        });
+      })(window.history);
+    </script>
+
+    <!-- Plugin initialization code will be injected into flutter_plugins.js -->
+    <script src="flutter_plugins.js" defer></script>
+    <script type="module" src="https://static.rocket.new/rocket-shot.js?v=0.0.2"></script>
+  </body>
+</html>

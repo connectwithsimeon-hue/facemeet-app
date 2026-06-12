@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F4513E" />
+    <title>FaceMeet Email Verified</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --coral: #f4513e;
+        --ink: #fff8f2;
+        --muted: #b8aaa2;
+        --bg: #050202;
+        --panel: rgba(28, 18, 15, 0.88);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at top, rgba(244, 81, 62, 0.18), transparent 34rem),
+          linear-gradient(180deg, #120805 0%, var(--bg) 100%);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(100%, 460px);
+        padding: 32px;
+        border: 1px solid rgba(244, 81, 62, 0.36);
+        border-radius: 28px;
+        background: var(--panel);
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+        text-align: center;
+      }
+
+      img {
+        width: 72px;
+        height: 72px;
+        border-radius: 20px;
+        object-fit: cover;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(28px, 7vw, 40px);
+        line-height: 1.04;
+      }
+
+      .instruction {
+        color: var(--ink);
+        font-weight: 700;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .hint {
+        margin-top: 16px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="icons/apple-touch-icon.png" alt="FaceMeet" />
+      <h1>Email verified successfully</h1>
+      <p>
+        You can now close this page.
+      </p>
+      <p class="instruction">
+        Open FaceMeet from your Home Screen and tap “I have verified my email”
+        to continue.
+      </p>
+      <p class="hint">
+        If you have not installed FaceMeet yet, return to the page where you
+        started signup.
+      </p>
+    </main>
+  </body>
+</html>

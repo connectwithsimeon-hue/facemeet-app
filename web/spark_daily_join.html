@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050505;
+        --panel: rgba(8, 8, 8, 0.74);
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --text: #ffffff;
+        --muted: rgba(255, 255, 255, 0.72);
+        --muted-2: rgba(255, 255, 255, 0.52);
+        --brand: #ff4458;
+        --brand-soft: rgba(255, 68, 88, 0.22);
+        --success: #19d28f;
+        --warning: #ffb347;
+        --shadow: 0 20px 44px rgba(0, 0, 0, 0.42);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--bg);
+        overflow: hidden;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: var(--text);
+      }
+
+      body {
+        position: relative;
+      }
+
+      #app {
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(circle at top, rgba(255, 68, 88, 0.2), transparent 28%),
+          linear-gradient(180deg, rgba(0, 0, 0, 0.54) 0%, rgba(0, 0, 0, 0.1) 18%, rgba(0, 0, 0, 0.5) 100%),
+          #020202;
+        overflow: hidden;
+      }
+
+      #remote-stage,
+      #local-stage {
+        overflow: hidden;
+        background:
+          radial-gradient(circle at center, rgba(255, 255, 255, 0.08), transparent 52%),
+          #080808;
+      }
+
+      #remote-stage {
+        position: absolute;
+        inset: 0;
+      }
+
+      #remote-video,
+      #local-video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        background: #050505;
+      }
+
+      #remote-video {
+        position: absolute;
+        inset: 0;
+      }
+
+      #local-shell {
+        position: absolute;
+        top: max(14px, env(safe-area-inset-top));
+        right: max(14px, env(safe-area-inset-right));
+        width: min(30vw, 126px);
+        aspect-ratio: 3 / 4.25;
+        border-radius: 22px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: var(--shadow);
+        z-index: 4;
+      }
+
+      #local-video {
+        transform: scaleX(-1);
+      }
+
+      .placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 20px;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--muted);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
+          rgba(0, 0, 0, 0.48);
+      }
+
+      #local-placeholder {
+        font-size: 12px;
+        padding: 12px;
+      }
+
+      #top-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 5;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding:
+          calc(env(safe-area-inset-top) + 16px)
+          max(16px, env(safe-area-inset-right))
+          0
+          max(16px, env(safe-area-inset-left));
+        pointer-events: none;
+      }
+
+      #brand-lockup {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 14px;
+        border-radius: 18px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        backdrop-filter: blur(16px);
+        box-shadow: var(--shadow);
+      }
+
+      #brand-name {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+      }
+
+      #brand-subtitle {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      #timer-pill {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 14px;
+        min-height: 42px;
+        border-radius: 999px;
+        background: rgba(7, 7, 7, 0.82);
+        border: 1px solid rgba(25, 210, 143, 0.45);
+        backdrop-filter: blur(16px);
+        box-shadow: var(--shadow);
+      }
+
+      #timer-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        box-shadow: 0 0 0 4px rgba(25, 210, 143, 0.16);
+      }
+
+      #timer-text {
+        font-size: 16px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        color: var(--success);
+      }
+
+      #status-banner {
+        position: absolute;
+        left: 50%;
+        bottom: calc(env(safe-area-inset-bottom) + 134px);
+        transform: translateX(-50%);
+        z-index: 5;
+        width: min(88vw, 340px);
+        padding: 16px 18px;
+        border-radius: 22px;
+        background: rgba(6, 6, 6, 0.76);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+        text-align: center;
+      }
+
+      #status-title {
+        font-size: 17px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      #status-copy {
+        font-size: 13px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      #bottom-controls {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 6;
+        display: flex;
+        justify-content: center;
+        gap: 18px;
+        pointer-events: auto;
+        padding:
+          18px
+          max(18px, env(safe-area-inset-right))
+          calc(env(safe-area-inset-bottom) + 22px)
+          max(18px, env(safe-area-inset-left));
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.76) 100%);
+      }
+
+      .control-button {
+        appearance: none;
+        border: 0;
+        width: 84px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        padding: 0;
+        font: inherit;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .control-hit {
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow);
+        transition:
+          transform 140ms ease,
+          background 140ms ease,
+          border-color 140ms ease;
+      }
+
+      .control-button:active .control-hit {
+        transform: scale(0.96);
+      }
+
+      .control-button span {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+
+      .control-button.is-active .control-hit {
+        background: rgba(255, 255, 255, 0.18);
+        border-color: rgba(255, 255, 255, 0.28);
+      }
+
+      .control-button.is-active span {
+        color: var(--text);
+      }
+
+      .control-button.is-end .control-hit {
+        background: rgba(232, 80, 58, 0.92);
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+
+      .control-button.is-end span {
+        color: #ffffff;
+      }
+
+      .control-icon {
+        width: 26px;
+        height: 26px;
+        display: block;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (min-width: 720px) {
+        #local-shell {
+          width: 154px;
+        }
+
+        #status-banner {
+          bottom: 158px;
+        }
+
+        #bottom-controls {
+          gap: 24px;
+        }
+      }
+    </style>
+    <script src="https://unpkg.com/@daily-co/daily-js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div id="remote-stage">
+        <video id="remote-video" autoplay playsinline muted></video>
+        <div id="remote-placeholder" class="placeholder">
+          Waiting for your Spark to join…
+        </div>
+      </div>
+
+      <div id="local-shell">
+        <video id="local-video" autoplay playsinline muted></video>
+        <div id="local-placeholder" class="placeholder">Camera preview</div>
+      </div>
+
+      <div id="top-bar">
+        <div id="brand-lockup">
+          <div id="brand-name">FaceMeet</div>
+          <div id="brand-subtitle">3-minute Spark Session</div>
+        </div>
+        <div id="timer-pill">
+          <div id="timer-dot"></div>
+          <div id="timer-text">03:00</div>
+        </div>
+      </div>
+
+      <div id="status-banner">
+        <div id="status-title">Preparing your private Spark Session</div>
+        <div id="status-copy">We’re opening your video room now.</div>
+      </div>
+
+      <div id="bottom-controls">
+        <button id="mute-button" class="control-button" type="button">
+          <div class="control-hit">
+            <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <path d="M12 19v3"></path>
+            </svg>
+          </div>
+          <span>Mute</span>
+        </button>
+
+        <button id="end-button" class="control-button is-end" type="button">
+          <div class="control-hit">
+            <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 15.3c4.7-3.6 11.3-3.6 16 0"></path>
+              <path d="m9 13 3 3 3-3"></path>
+            </svg>
+          </div>
+          <span>End</span>
+        </button>
+
+        <button id="camera-button" class="control-button" type="button">
+          <div class="control-hit">
+            <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 9.5 18 7v10l-4-2.5"></path>
+              <rect x="3" y="7" width="11" height="10" rx="2"></rect>
+            </svg>
+          </div>
+          <span>Camera Off</span>
+        </button>
+      </div>
+    </div>
+
+    <audio id="remote-audio" autoplay playsinline></audio>
+
+    <script>
+      (function () {
+        const remoteVideo = document.getElementById("remote-video");
+        const localVideo = document.getElementById("local-video");
+        const remoteAudio = document.getElementById("remote-audio");
+        const remotePlaceholder = document.getElementById("remote-placeholder");
+        const localPlaceholder = document.getElementById("local-placeholder");
+        const statusBanner = document.getElementById("status-banner");
+        const statusTitle = document.getElementById("status-title");
+        const statusCopy = document.getElementById("status-copy");
+        const timerPill = document.getElementById("timer-pill");
+        const timerText = document.getElementById("timer-text");
+        const timerDot = document.getElementById("timer-dot");
+        const muteButton = document.getElementById("mute-button");
+        const cameraButton = document.getElementById("camera-button");
+        const endButton = document.getElementById("end-button");
+
+        let callObject = null;
+        let activeRoomUrl = "";
+        let activeMeetingToken = "";
+        let joinInFlight = false;
+        let hasJoinedMeeting = false;
+        let suppressLeftEventsUntil = 0;
+        let endingFromParent = false;
+        let localAudioEnabled = true;
+        let localVideoEnabled = true;
+        let remoteParticipantPresent = false;
+        let currentRemoteParticipant = null;
+        let uiState = {
+          showFaceMeetTimer: false,
+          timerText: "03:00",
+          timerIsUrgent: false,
+        };
+
+        function post(type, extra) {
+          const payload = Object.assign(
+            { source: "facemeet-daily", type },
+            extra || {},
+          );
+          window.parent.postMessage(JSON.stringify(payload), "*");
+        }
+
+        function extractMessage(error) {
+          if (!error) return "Daily join failed";
+          if (typeof error.message === "string" && error.message) return error.message;
+          if (typeof error.errorMsg === "string" && error.errorMsg) return error.errorMsg;
+          if (typeof error.error === "string" && error.error) return error.error;
+          return String(error);
+        }
+
+        function participantIsLocal(participant, key) {
+          if (!participant) return false;
+          if (key === "local") return true;
+          if (participant.local === true) return true;
+          if (participant.info && participant.info.isLocal === true) return true;
+          return false;
+        }
+
+        function getTrackInfo(participant, kind) {
+          const trackInfo = participant &&
+            participant.tracks &&
+            participant.tracks[kind];
+          return trackInfo || null;
+        }
+
+        function getTrack(participant, kind) {
+          const trackInfo = getTrackInfo(participant, kind);
+          if (!trackInfo) return null;
+          return trackInfo.persistentTrack || trackInfo.track || null;
+        }
+
+        function isPlayableTrack(trackInfo, track) {
+          if (!trackInfo || !track) return false;
+          if (track.readyState && track.readyState !== "live") return false;
+          const state = (trackInfo.state || "").toLowerCase();
+          if (!state) return true;
+          return [
+            "playable",
+            "sendable",
+            "loading",
+            "interrupted",
+          ].includes(state);
+        }
+
+        function clearElementMedia(element) {
+          element.pause && element.pause();
+          element.srcObject = null;
+          if (element.dataset) {
+            delete element.dataset.trackId;
+          }
+        }
+
+        function attachTrack(element, track, options) {
+          const muted = !!(options && options.muted);
+          const trackId = track && track.id ? track.id : "";
+          if (!trackId) {
+            clearElementMedia(element);
+            return;
+          }
+          if (element.dataset && element.dataset.trackId === trackId) {
+            return;
+          }
+
+          const stream = new MediaStream();
+          stream.addTrack(track);
+          element.srcObject = stream;
+          element.muted = muted;
+          if (element.dataset) {
+            element.dataset.trackId = trackId;
+          }
+          const playResult = element.play && element.play();
+          if (playResult && typeof playResult.catch === "function") {
+            playResult.catch(function () {});
+          }
+        }
+
+        function updateStatusBanner() {
+          if (!hasJoinedMeeting) {
+            statusBanner.classList.remove("hidden");
+            statusTitle.textContent = "Preparing your private Spark Session";
+            statusCopy.textContent = "We’re opening your video room now.";
+            return;
+          }
+
+          if (!remoteParticipantPresent) {
+            statusBanner.classList.remove("hidden");
+            statusTitle.textContent = "Waiting for your Spark to join…";
+            statusCopy.textContent = "You’ll connect automatically as soon as they arrive.";
+            return;
+          }
+
+          statusBanner.classList.add("hidden");
+        }
+
+        function updateTimerDisplay() {
+          if (uiState.showFaceMeetTimer) {
+            timerPill.style.display = "inline-flex";
+            timerText.textContent = uiState.timerText || "03:00";
+            const color = uiState.timerIsUrgent ? "#FF5A45" : "#19D28F";
+            timerText.style.color = color;
+            timerDot.style.background = color;
+            timerDot.style.boxShadow =
+              uiState.timerIsUrgent
+                ? "0 0 0 4px rgba(255, 90, 69, 0.16)"
+                : "0 0 0 4px rgba(25, 210, 143, 0.16)";
+            timerPill.style.borderColor =
+              uiState.timerIsUrgent
+                ? "rgba(255, 90, 69, 0.45)"
+                : "rgba(25, 210, 143, 0.45)";
+          } else {
+            timerPill.style.display = "none";
+          }
+        }
+
+        function updateControlLabels() {
+          muteButton.classList.toggle("is-active", !localAudioEnabled);
+          muteButton.querySelector("span").textContent =
+            localAudioEnabled ? "Mute" : "Unmute";
+
+          cameraButton.classList.toggle("is-active", !localVideoEnabled);
+          cameraButton.querySelector("span").textContent =
+            localVideoEnabled ? "Camera Off" : "Camera On";
+        }
+
+        function renderParticipants() {
+          if (!callObject || typeof callObject.participants !== "function") {
+            return;
+          }
+
+          const participantsMap = callObject.participants() || {};
+          const entries = Object.entries(participantsMap).filter(function (entry) {
+            return !!entry[1];
+          });
+          const localEntry = entries.find(function (entry) {
+            return participantIsLocal(entry[1], entry[0]);
+          }) || null;
+          const remoteEntry = entries.find(function (entry) {
+            return !participantIsLocal(entry[1], entry[0]);
+          }) || null;
+          const localParticipant = localEntry ? localEntry[1] : null;
+          const remoteParticipant = remoteEntry ? remoteEntry[1] : null;
+
+          currentRemoteParticipant = remoteParticipant;
+          remoteParticipantPresent = !!remoteParticipant;
+
+          const localVideoTrackInfo = getTrackInfo(localParticipant, "video");
+          const remoteVideoTrackInfo = getTrackInfo(remoteParticipant, "video");
+          const remoteAudioTrackInfo = getTrackInfo(remoteParticipant, "audio");
+          const localVideoTrack = getTrack(localParticipant, "video");
+          const remoteVideoTrack = getTrack(remoteParticipant, "video");
+          const remoteAudioTrack = getTrack(remoteParticipant, "audio");
+          const hasPlayableLocalVideo = isPlayableTrack(
+            localVideoTrackInfo,
+            localVideoTrack,
+          );
+          const hasPlayableRemoteVideo = isPlayableTrack(
+            remoteVideoTrackInfo,
+            remoteVideoTrack,
+          );
+          const hasPlayableRemoteAudio = isPlayableTrack(
+            remoteAudioTrackInfo,
+            remoteAudioTrack,
+          );
+
+          if (hasPlayableLocalVideo) {
+            attachTrack(localVideo, localVideoTrack, { muted: true });
+          } else {
+            clearElementMedia(localVideo);
+          }
+          if (hasPlayableRemoteVideo) {
+            attachTrack(remoteVideo, remoteVideoTrack, { muted: true });
+          } else {
+            clearElementMedia(remoteVideo);
+          }
+          if (hasPlayableRemoteAudio) {
+            attachTrack(remoteAudio, remoteAudioTrack, { muted: false });
+          } else {
+            clearElementMedia(remoteAudio);
+          }
+
+          localPlaceholder.classList.toggle("hidden", hasPlayableLocalVideo);
+          remotePlaceholder.classList.toggle("hidden", hasPlayableRemoteVideo);
+
+          if (!hasPlayableRemoteVideo) {
+            remotePlaceholder.textContent = remoteParticipantPresent
+              ? "Your Spark’s camera is off"
+              : "Waiting for your Spark to join…";
+          }
+
+          console.info("FACEMEET DAILY: participants rendered", {
+            participantKeys: entries.map(function (entry) { return entry[0]; }),
+            localParticipantId: localParticipant && (localParticipant.session_id || localParticipant.user_id || localParticipant.user_name || null),
+            remoteParticipantId: remoteParticipant && (remoteParticipant.session_id || remoteParticipant.user_id || remoteParticipant.user_name || null),
+            remotePresent: remoteParticipantPresent,
+            localVideoState: localVideoTrackInfo && localVideoTrackInfo.state,
+            remoteVideoState: remoteVideoTrackInfo && remoteVideoTrackInfo.state,
+            remoteAudioState: remoteAudioTrackInfo && remoteAudioTrackInfo.state,
+            localVideoReadyState: localVideoTrack && localVideoTrack.readyState,
+            remoteVideoReadyState: remoteVideoTrack && remoteVideoTrack.readyState,
+            remoteAudioReadyState: remoteAudioTrack && remoteAudioTrack.readyState,
+          });
+
+          updateStatusBanner();
+        }
+
+        function applyUiState(payload) {
+          uiState = {
+            showFaceMeetTimer: !!payload.showFaceMeetTimer,
+            timerText:
+              typeof payload.timerText === "string" && payload.timerText
+                ? payload.timerText
+                : "03:00",
+            timerIsUrgent: !!payload.timerIsUrgent,
+          };
+          updateTimerDisplay();
+        }
+
+        async function ensureCallObject() {
+          if (callObject) return callObject;
+          if (!window.DailyIframe ||
+              typeof window.DailyIframe.createCallObject !== "function") {
+            throw new Error("Daily video service failed to load.");
+          }
+
+          callObject = window.DailyIframe.createCallObject();
+
+          callObject.on("joined-meeting", function () {
+            hasJoinedMeeting = true;
+            renderParticipants();
+            updateStatusBanner();
+            post("joined");
+          });
+
+          callObject.on("participant-joined", function (event) {
+            renderParticipants();
+            if (event && event.participant && !participantIsLocal(event.participant)) {
+              post("remote-participant-joined");
+            }
+          });
+
+          callObject.on("participant-updated", function () {
+            renderParticipants();
+          });
+
+          callObject.on("participant-left", function (event) {
+            renderParticipants();
+            if (event && event.participant && !participantIsLocal(event.participant)) {
+              post("remote-participant-left");
+            }
+          });
+
+          callObject.on("track-started", function () {
+            renderParticipants();
+          });
+
+          callObject.on("track-stopped", function () {
+            renderParticipants();
+          });
+
+          callObject.on("left-meeting", function () {
+            if (Date.now() < suppressLeftEventsUntil) {
+              return;
+            }
+            clearElementMedia(remoteAudio);
+            clearElementMedia(remoteVideo);
+            clearElementMedia(localVideo);
+            remoteParticipantPresent = false;
+            updateStatusBanner();
+            if (endingFromParent) {
+              post("left");
+              return;
+            }
+            if (!hasJoinedMeeting) {
+              post("error", { message: "Daily call closed before joining." });
+              return;
+            }
+            post("left");
+          });
+
+          callObject.on("error", function (event) {
+            post("error", { message: extractMessage(event) });
+          });
+
+          return callObject;
+        }
+
+        async function leaveCurrentCall() {
+          if (!callObject) return;
+          suppressLeftEventsUntil = Date.now() + 2000;
+          try {
+            await callObject.leave();
+          } catch (_) {}
+          try {
+            await callObject.destroy();
+          } catch (_) {}
+          callObject = null;
+          hasJoinedMeeting = false;
+          remoteParticipantPresent = false;
+          currentRemoteParticipant = null;
+          endingFromParent = false;
+          clearElementMedia(remoteAudio);
+          clearElementMedia(remoteVideo);
+          clearElementMedia(localVideo);
+          localPlaceholder.classList.remove("hidden");
+          remotePlaceholder.classList.remove("hidden");
+          updateStatusBanner();
+        }
+
+        async function startJoin() {
+          if (joinInFlight) return;
+          if (!activeRoomUrl || !activeMeetingToken) {
+            post("error", { message: "Secure Spark Session access is missing." });
+            return;
+          }
+
+          joinInFlight = true;
+          try {
+            const call = await ensureCallObject();
+            localAudioEnabled = true;
+            localVideoEnabled = true;
+            updateControlLabels();
+            await call.setLocalAudio(true);
+            await call.setLocalVideo(true);
+            renderParticipants();
+            updateStatusBanner();
+            await call.join({ url: activeRoomUrl, token: activeMeetingToken });
+          } catch (error) {
+            post("error", { message: extractMessage(error) });
+          } finally {
+            joinInFlight = false;
+          }
+        }
+
+        muteButton.addEventListener("click", async function () {
+          if (!callObject) return;
+          try {
+            localAudioEnabled = !localAudioEnabled;
+            await callObject.setLocalAudio(localAudioEnabled);
+            updateControlLabels();
+            post("mute-changed", { muted: !localAudioEnabled });
+          } catch (error) {
+            localAudioEnabled = !localAudioEnabled;
+            post("error", { message: extractMessage(error) });
+          }
+        });
+
+        cameraButton.addEventListener("click", async function () {
+          if (!callObject) return;
+          try {
+            localVideoEnabled = !localVideoEnabled;
+            await callObject.setLocalVideo(localVideoEnabled);
+            updateControlLabels();
+            renderParticipants();
+            post("camera-changed", { cameraOff: !localVideoEnabled });
+          } catch (error) {
+            localVideoEnabled = !localVideoEnabled;
+            post("error", { message: extractMessage(error) });
+          }
+        });
+
+        endButton.addEventListener("click", function () {
+          post("end-requested");
+        });
+
+        window.addEventListener("message", async function (event) {
+          let payload = event.data;
+          if (!payload) return;
+
+          if (typeof payload === "string") {
+            try {
+              payload = JSON.parse(payload);
+            } catch (_) {}
+          }
+
+          if (!payload || payload.source !== "facemeet-parent") return;
+
+          if (payload.type === "ui-state") {
+            applyUiState(payload);
+            return;
+          }
+
+          if (payload.type === "leave") {
+            endingFromParent = true;
+            await leaveCurrentCall();
+            post("left");
+            return;
+          }
+
+          if (payload.type === "start") {
+            const nextRoomUrl =
+              typeof payload.roomUrl === "string" ? payload.roomUrl : "";
+            const nextMeetingToken =
+              typeof payload.meetingToken === "string" ? payload.meetingToken : "";
+            const sameAccess =
+              nextRoomUrl === activeRoomUrl &&
+              nextMeetingToken === activeMeetingToken;
+
+            if (sameAccess && (callObject || joinInFlight)) {
+              return;
+            }
+
+            activeRoomUrl = nextRoomUrl;
+            activeMeetingToken = nextMeetingToken;
+            hasJoinedMeeting = false;
+            endingFromParent = false;
+            await leaveCurrentCall();
+            updateStatusBanner();
+            await startJoin();
+          }
+        });
+
+        updateControlLabels();
+        updateStatusBanner();
+        updateTimerDisplay();
+
+        window.addEventListener("load", function () {
+          post("wrapper-ready");
+        });
+
+        window.addEventListener("error", function (event) {
+          post("error", {
+            message: extractMessage(event && (event.error || event.message)),
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
