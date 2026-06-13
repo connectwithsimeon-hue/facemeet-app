@@ -579,11 +579,53 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
   }
 
   Future<void> _toggleMute() async {
-    setState(() => _isMuted = !_isMuted);
+    final nextMuted = !_isMuted;
+    try {
+      final nativeState = _nativeCallKey.currentState;
+      if (nativeState == null) {
+        throw StateError('Native Daily call is not ready');
+      }
+      await nativeState.setMuted(nextMuted);
+      if (!mounted) return;
+      setState(() => _isMuted = nextMuted);
+    } catch (e) {
+      debugPrint('SPARK VIDEO CALL: native mute toggle failed — $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update microphone. Please try again.',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
   }
 
   Future<void> _toggleCamera() async {
-    setState(() => _isCameraOff = !_isCameraOff);
+    final nextCameraOff = !_isCameraOff;
+    try {
+      final nativeState = _nativeCallKey.currentState;
+      if (nativeState == null) {
+        throw StateError('Native Daily call is not ready');
+      }
+      await nativeState.setCameraOff(nextCameraOff);
+      if (!mounted) return;
+      setState(() => _isCameraOff = nextCameraOff);
+    } catch (e) {
+      debugPrint('SPARK VIDEO CALL: native camera toggle failed — $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update camera. Please try again.',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
   }
 
   void _onWebMuteChanged(bool muted) {

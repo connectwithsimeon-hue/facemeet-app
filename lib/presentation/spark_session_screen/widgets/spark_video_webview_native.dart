@@ -12,6 +12,8 @@ class SparkVideoWebView extends StatefulWidget {
   final VoidCallback onConnected;
   final VoidCallback? onRemoteParticipantJoined;
   final VoidCallback? onEndRequested;
+  final void Function(bool muted)? onMuteChanged;
+  final void Function(bool cameraOff)? onCameraChanged;
   final void Function(String error)? onError;
   final bool showFaceMeetTimer;
   final String timerText;
@@ -24,6 +26,8 @@ class SparkVideoWebView extends StatefulWidget {
     required this.onConnected,
     this.onRemoteParticipantJoined,
     this.onEndRequested,
+    this.onMuteChanged,
+    this.onCameraChanged,
     this.onError,
     this.showFaceMeetTimer = false,
     this.timerText = '03:00',
@@ -207,6 +211,15 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
     });
   }
 
+  Future<void> retryJoin() async {
+    debugPrint('SPARK WEBVIEW: retryJoin requested');
+    _connected = false;
+    _participantSeen = false;
+    _connectionTimer?.cancel();
+    await leaveCall();
+    _initWebView();
+  }
+
   Future<void> leaveCall() async {
     try {
       await _controller.runJavaScript('''
@@ -227,6 +240,14 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
         'SPARK WEBVIEW: leaveCall JS injection failed (non-critical) — $e',
       );
     }
+  }
+
+  void sendToggleMuteCommand() {}
+
+  void sendToggleCameraCommand() {}
+
+  void sendEndCallCommand() {
+    widget.onEndRequested?.call();
   }
 
   @override

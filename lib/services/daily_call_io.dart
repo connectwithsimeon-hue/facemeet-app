@@ -53,6 +53,42 @@ class DailyCallViewState extends State<DailyCallView> {
     }
   }
 
+  Future<void> setMuted(bool muted) async {
+    final client = _client;
+    if (client == null) {
+      throw StateError('Daily call is not ready');
+    }
+
+    await client.updateInputs(
+      inputs: InputSettingsUpdate.set(
+        microphone: MicrophoneInputSettingsUpdate.set(
+          isEnabled: BoolUpdate.set(!muted),
+        ),
+      ),
+    );
+    debugPrint(
+      'DAILY CALL VIEW: native microphone ${muted ? "muted" : "unmuted"}',
+    );
+  }
+
+  Future<void> setCameraOff(bool cameraOff) async {
+    final client = _client;
+    if (client == null) {
+      throw StateError('Daily call is not ready');
+    }
+
+    await client.updateInputs(
+      inputs: InputSettingsUpdate.set(
+        camera: CameraInputSettingsUpdate.set(
+          isEnabled: BoolUpdate.set(!cameraOff),
+        ),
+      ),
+    );
+    debugPrint(
+      'DAILY CALL VIEW: native camera ${cameraOff ? "disabled" : "enabled"}',
+    );
+  }
+
   Future<void> retryJoin() async {
     debugPrint('SPARK SESSION: Daily join retry started — manual retry');
     try {

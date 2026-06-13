@@ -33,6 +33,10 @@ class DailyCallViewState extends State<DailyCallView> {
   /// No-op on web — audio/video is handled by WebView
   Future<void> leave() async {}
 
+  Future<void> setMuted(bool muted) async {}
+
+  Future<void> setCameraOff(bool cameraOff) async {}
+
   Future<void> retryJoin() async {}
 
   @override
