@@ -4,6 +4,7 @@ import 'dart:html' as html;
 import 'dart:ui_web' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 /// Web implementation for Daily Spark Sessions using a tokenized DailyIframe
 /// join flow inside an isolated iframe document.
@@ -13,6 +14,8 @@ class SparkVideoWebView extends StatefulWidget {
   final VoidCallback onConnected;
   final VoidCallback? onRemoteParticipantJoined;
   final VoidCallback? onEndRequested;
+  final void Function(bool muted)? onMuteChanged;
+  final void Function(bool cameraOff)? onCameraChanged;
   final void Function(String error)? onError;
   final bool showFaceMeetTimer;
   final String timerText;
@@ -25,6 +28,8 @@ class SparkVideoWebView extends StatefulWidget {
     required this.onConnected,
     this.onRemoteParticipantJoined,
     this.onEndRequested,
+    this.onMuteChanged,
+    this.onCameraChanged,
     this.onError,
     this.showFaceMeetTimer = false,
     this.timerText = '03:00',
@@ -57,7 +62,8 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
     _listenForDailyMessages();
   }
 
-  String _wrapperUrl() => 'spark_daily_join.html?v=20260612';
+  String _wrapperUrl() =>
+      'spark_daily_join.html?v=20260612&external_controls=1';
 
   void _postStartPayload() {
     _postToDailyFrame({
@@ -84,7 +90,8 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
       ..style.width = '100%'
       ..style.height = '100%'
       ..style.backgroundColor = '#000'
-      ..style.overflow = 'hidden';
+      ..style.overflow = 'hidden'
+      ..style.pointerEvents = 'auto';
 
     _iframe = html.IFrameElement()
       ..src = _wrapperUrl()
@@ -95,7 +102,8 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
       ..style.width = '100%'
       ..style.height = '100%'
       ..style.backgroundColor = '#000'
-      ..style.display = 'block';
+      ..style.display = 'block'
+      ..style.pointerEvents = 'auto';
 
     _loadSub = _iframe.onLoad.listen((_) {
       debugPrint(
@@ -157,12 +165,19 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
             .trim();
         debugPrint('SPARK SESSION: web Daily error — $message');
         widget.onError?.call(message);
+      } else if (type == 'mute-changed') {
+        widget.onMuteChanged?.call(payload['muted'] == true);
+      } else if (type == 'camera-changed') {
+        widget.onCameraChanged?.call(payload['cameraOff'] == true);
       } else if (type == 'wrapper-ready') {
         _postStartPayload();
         _postUiStatePayload();
       } else if (type == 'end-requested') {
         debugPrint('DAILY WEB END: wrapper requested FaceMeet end flow');
-        widget.onEndRequested?.call();
+        _requestFaceMeetEnd('wrapper end requested');
+      } else if (type == 'timer-ended') {
+        debugPrint('DAILY WEB END: wrapper timer reached zero');
+        _requestFaceMeetEnd('wrapper timer ended');
       }
     });
   }
@@ -204,6 +219,27 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
     } catch (e) {
       debugPrint('SPARK SESSION: web Daily leave failed — $e');
     }
+  }
+
+  void sendToggleMuteCommand() {
+    _postToDailyFrame({
+      'source': 'facemeet-parent',
+      'type': 'toggle-mute',
+    });
+  }
+
+  void sendToggleCameraCommand() {
+    _postToDailyFrame({
+      'source': 'facemeet-parent',
+      'type': 'toggle-camera',
+    });
+  }
+
+  void sendEndCallCommand() {
+    _postToDailyFrame({
+      'source': 'facemeet-parent',
+      'type': 'end-call',
+    });
   }
 
   @override
@@ -248,6 +284,9 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
       return const ColoredBox(color: Colors.black);
     }
 
-    return HtmlElementView(viewType: _viewType);
+    return HtmlElementView(
+      viewType: _viewType,
+      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+    );
   }
 }

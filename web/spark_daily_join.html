@@ -70,6 +70,7 @@
       #remote-stage {
         position: absolute;
         inset: 0;
+        pointer-events: none;
       }
 
       #remote-video,
@@ -79,6 +80,7 @@
         object-fit: cover;
         display: block;
         background: #050505;
+        pointer-events: none;
       }
 
       #remote-video {
@@ -98,6 +100,7 @@
         border: 1px solid rgba(255, 255, 255, 0.18);
         box-shadow: var(--shadow);
         z-index: 4;
+        pointer-events: none;
       }
 
       #local-video {
@@ -118,6 +121,7 @@
         background:
           linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
           rgba(0, 0, 0, 0.48);
+        pointer-events: none;
       }
 
       #local-placeholder {
@@ -209,6 +213,7 @@
         box-shadow: var(--shadow);
         backdrop-filter: blur(16px);
         text-align: center;
+        pointer-events: none;
       }
 
       #status-title {
@@ -228,7 +233,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 6;
+        z-index: 20;
         display: flex;
         justify-content: center;
         gap: 18px;
@@ -242,6 +247,8 @@
       }
 
       .control-button {
+        position: relative;
+        z-index: 21;
         appearance: none;
         border: 0;
         width: 84px;
@@ -255,6 +262,7 @@
         padding: 0;
         font: inherit;
         touch-action: manipulation;
+        pointer-events: auto;
         -webkit-tap-highlight-color: transparent;
       }
 
@@ -410,6 +418,10 @@
         const muteButton = document.getElementById("mute-button");
         const cameraButton = document.getElementById("camera-button");
         const endButton = document.getElementById("end-button");
+        const bottomControls = document.getElementById("bottom-controls");
+        const queryParams = new URLSearchParams(window.location.search);
+        const externalControlsEnabled =
+          queryParams.get("external_controls") === "1";
 
         let callObject = null;
         let activeRoomUrl = "";
@@ -422,11 +434,14 @@
         let localVideoEnabled = true;
         let remoteParticipantPresent = false;
         let currentRemoteParticipant = null;
-        let uiState = {
-          showFaceMeetTimer: false,
-          timerText: "03:00",
-          timerIsUrgent: false,
-        };
+        let terminalEventPosted = false;
+        let timerStarted = false;
+        let timerFinished = false;
+        let timerInterval = null;
+        let secondsRemaining = 180;
+        let refreshTimers = [];
+        let participantPollInterval = null;
+        let joinedEventPosted = false;
 
         function post(type, extra) {
           const payload = Object.assign(
@@ -528,24 +543,60 @@
           statusBanner.classList.add("hidden");
         }
 
+        function formatTime(totalSeconds) {
+          const safeSeconds = Math.max(0, totalSeconds);
+          const minutes = Math.floor(safeSeconds / 60);
+          const seconds = safeSeconds % 60;
+          return String(minutes).padStart(2, "0") + ":" +
+            String(seconds).padStart(2, "0");
+        }
+
         function updateTimerDisplay() {
-          if (uiState.showFaceMeetTimer) {
-            timerPill.style.display = "inline-flex";
-            timerText.textContent = uiState.timerText || "03:00";
-            const color = uiState.timerIsUrgent ? "#FF5A45" : "#19D28F";
-            timerText.style.color = color;
-            timerDot.style.background = color;
-            timerDot.style.boxShadow =
-              uiState.timerIsUrgent
-                ? "0 0 0 4px rgba(255, 90, 69, 0.16)"
-                : "0 0 0 4px rgba(25, 210, 143, 0.16)";
-            timerPill.style.borderColor =
-              uiState.timerIsUrgent
-                ? "rgba(255, 90, 69, 0.45)"
-                : "rgba(25, 210, 143, 0.45)";
-          } else {
-            timerPill.style.display = "none";
+          timerText.textContent = formatTime(secondsRemaining);
+          const urgent = secondsRemaining <= 60;
+          const color = urgent ? "#FF5A45" : "#19D28F";
+          timerText.style.color = color;
+          timerDot.style.background = color;
+          timerDot.style.boxShadow =
+            urgent
+              ? "0 0 0 4px rgba(255, 90, 69, 0.16)"
+              : "0 0 0 4px rgba(25, 210, 143, 0.16)";
+          timerPill.style.borderColor =
+            urgent ? "rgba(255, 90, 69, 0.45)" : "rgba(25, 210, 143, 0.45)";
+        }
+
+        function resetTimer() {
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
           }
+          timerStarted = false;
+          timerFinished = false;
+          secondsRemaining = 180;
+          timerPill.style.display = "none";
+          updateTimerDisplay();
+        }
+
+        function maybeStartTimer() {
+          if (timerStarted || timerFinished) return;
+          if (!hasJoinedMeeting || !remoteParticipantPresent) return;
+
+          timerStarted = true;
+          timerPill.style.display = "inline-flex";
+          updateTimerDisplay();
+          timerInterval = window.setInterval(function () {
+            secondsRemaining = Math.max(0, secondsRemaining - 1);
+            updateTimerDisplay();
+            if (secondsRemaining <= 0) {
+              if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+              }
+              timerFinished = true;
+              post("timer-ended");
+              requestEnd("timer");
+            }
+          }, 1000);
         }
 
         function updateControlLabels() {
@@ -556,6 +607,48 @@
           cameraButton.classList.toggle("is-active", !localVideoEnabled);
           cameraButton.querySelector("span").textContent =
             localVideoEnabled ? "Camera Off" : "Camera On";
+        }
+
+        function clearScheduledRefreshes() {
+          refreshTimers.forEach(function (timerId) {
+            window.clearTimeout(timerId);
+          });
+          refreshTimers = [];
+        }
+
+        function bounded(promise, timeoutMs) {
+          return Promise.race([
+            Promise.resolve(promise),
+            new Promise(function (resolve) {
+              window.setTimeout(resolve, timeoutMs);
+            }),
+          ]);
+        }
+
+        function scheduleParticipantRefresh() {
+          if (window.requestAnimationFrame) {
+            window.requestAnimationFrame(renderParticipants);
+          }
+          [100, 500, 1500].forEach(function (delayMs) {
+            refreshTimers.push(window.setTimeout(renderParticipants, delayMs));
+          });
+        }
+
+        function startParticipantPolling() {
+          if (participantPollInterval) return;
+          participantPollInterval = window.setInterval(renderParticipants, 1000);
+        }
+
+        function stopParticipantPolling() {
+          if (!participantPollInterval) return;
+          window.clearInterval(participantPollInterval);
+          participantPollInterval = null;
+        }
+
+        function postJoinedOnce() {
+          if (joinedEventPosted) return;
+          joinedEventPosted = true;
+          post("joined");
         }
 
         function renderParticipants() {
@@ -575,6 +668,7 @@
           }) || null;
           const localParticipant = localEntry ? localEntry[1] : null;
           const remoteParticipant = remoteEntry ? remoteEntry[1] : null;
+          const hadRemoteParticipant = remoteParticipantPresent;
 
           currentRemoteParticipant = remoteParticipant;
           remoteParticipantPresent = !!remoteParticipant;
@@ -623,31 +717,18 @@
               : "Waiting for your Spark to join…";
           }
 
-          console.info("FACEMEET DAILY: participants rendered", {
-            participantKeys: entries.map(function (entry) { return entry[0]; }),
-            localParticipantId: localParticipant && (localParticipant.session_id || localParticipant.user_id || localParticipant.user_name || null),
-            remoteParticipantId: remoteParticipant && (remoteParticipant.session_id || remoteParticipant.user_id || remoteParticipant.user_name || null),
-            remotePresent: remoteParticipantPresent,
-            localVideoState: localVideoTrackInfo && localVideoTrackInfo.state,
-            remoteVideoState: remoteVideoTrackInfo && remoteVideoTrackInfo.state,
-            remoteAudioState: remoteAudioTrackInfo && remoteAudioTrackInfo.state,
-            localVideoReadyState: localVideoTrack && localVideoTrack.readyState,
-            remoteVideoReadyState: remoteVideoTrack && remoteVideoTrack.readyState,
-            remoteAudioReadyState: remoteAudioTrack && remoteAudioTrack.readyState,
-          });
-
           updateStatusBanner();
+          maybeStartTimer();
+
+          if (!hadRemoteParticipant && remoteParticipantPresent) {
+            post("remote-participant-joined");
+          } else if (hadRemoteParticipant && !remoteParticipantPresent) {
+            post("remote-participant-left");
+          }
+
         }
 
         function applyUiState(payload) {
-          uiState = {
-            showFaceMeetTimer: !!payload.showFaceMeetTimer,
-            timerText:
-              typeof payload.timerText === "string" && payload.timerText
-                ? payload.timerText
-                : "03:00",
-            timerIsUrgent: !!payload.timerIsUrgent,
-          };
           updateTimerDisplay();
         }
 
@@ -662,13 +743,17 @@
 
           callObject.on("joined-meeting", function () {
             hasJoinedMeeting = true;
+            startParticipantPolling();
             renderParticipants();
+            scheduleParticipantRefresh();
             updateStatusBanner();
-            post("joined");
+            maybeStartTimer();
+            postJoinedOnce();
           });
 
           callObject.on("participant-joined", function (event) {
             renderParticipants();
+            scheduleParticipantRefresh();
             if (event && event.participant && !participantIsLocal(event.participant)) {
               post("remote-participant-joined");
             }
@@ -676,10 +761,12 @@
 
           callObject.on("participant-updated", function () {
             renderParticipants();
+            scheduleParticipantRefresh();
           });
 
           callObject.on("participant-left", function (event) {
             renderParticipants();
+            scheduleParticipantRefresh();
             if (event && event.participant && !participantIsLocal(event.participant)) {
               post("remote-participant-left");
             }
@@ -687,10 +774,12 @@
 
           callObject.on("track-started", function () {
             renderParticipants();
+            scheduleParticipantRefresh();
           });
 
           callObject.on("track-stopped", function () {
             renderParticipants();
+            scheduleParticipantRefresh();
           });
 
           callObject.on("left-meeting", function () {
@@ -721,6 +810,8 @@
         }
 
         async function leaveCurrentCall() {
+          clearScheduledRefreshes();
+          stopParticipantPolling();
           if (!callObject) return;
           suppressLeftEventsUntil = Date.now() + 2000;
           try {
@@ -742,6 +833,43 @@
           updateStatusBanner();
         }
 
+        async function leaveAndDestroyForEnd() {
+          clearScheduledRefreshes();
+          stopParticipantPolling();
+          suppressLeftEventsUntil = Date.now() + 2000;
+          if (callObject) {
+            const callToClose = callObject;
+            try {
+              await bounded(callToClose.leave(), 900);
+            } catch (_) {}
+            try {
+              await bounded(callToClose.destroy(), 900);
+            } catch (_) {}
+          }
+          callObject = null;
+          hasJoinedMeeting = false;
+          remoteParticipantPresent = false;
+          currentRemoteParticipant = null;
+          endingFromParent = false;
+          clearElementMedia(remoteAudio);
+          clearElementMedia(remoteVideo);
+          clearElementMedia(localVideo);
+          localPlaceholder.classList.remove("hidden");
+          remotePlaceholder.classList.remove("hidden");
+          updateStatusBanner();
+        }
+
+        async function requestEnd(reason) {
+          if (terminalEventPosted) return;
+          terminalEventPosted = true;
+          if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+          }
+          post("end-requested", { reason: reason || "user" });
+          await leaveAndDestroyForEnd();
+        }
+
         async function startJoin() {
           if (joinInFlight) return;
           if (!activeRoomUrl || !activeMeetingToken) {
@@ -760,6 +888,11 @@
             renderParticipants();
             updateStatusBanner();
             await call.join({ url: activeRoomUrl, token: activeMeetingToken });
+            hasJoinedMeeting = true;
+            startParticipantPolling();
+            renderParticipants();
+            scheduleParticipantRefresh();
+            postJoinedOnce();
           } catch (error) {
             post("error", { message: extractMessage(error) });
           } finally {
@@ -767,35 +900,49 @@
           }
         }
 
-        muteButton.addEventListener("click", async function () {
+        async function toggleLocalAudio() {
           if (!callObject) return;
+          const nextAudioEnabled = !localAudioEnabled;
+          localAudioEnabled = nextAudioEnabled;
+          updateControlLabels();
+          post("mute-changed", { muted: !localAudioEnabled });
           try {
-            localAudioEnabled = !localAudioEnabled;
-            await callObject.setLocalAudio(localAudioEnabled);
-            updateControlLabels();
-            post("mute-changed", { muted: !localAudioEnabled });
+            await bounded(callObject.setLocalAudio(nextAudioEnabled), 900);
           } catch (error) {
-            localAudioEnabled = !localAudioEnabled;
+            localAudioEnabled = !nextAudioEnabled;
+            updateControlLabels();
             post("error", { message: extractMessage(error) });
           }
+        }
+
+        async function toggleLocalVideo() {
+          if (!callObject) return;
+          const nextVideoEnabled = !localVideoEnabled;
+          localVideoEnabled = nextVideoEnabled;
+          updateControlLabels();
+          renderParticipants();
+          post("camera-changed", { cameraOff: !localVideoEnabled });
+          try {
+            await bounded(callObject.setLocalVideo(nextVideoEnabled), 900);
+            renderParticipants();
+          } catch (error) {
+            localVideoEnabled = !nextVideoEnabled;
+            updateControlLabels();
+            renderParticipants();
+            post("error", { message: extractMessage(error) });
+          }
+        }
+
+        muteButton.addEventListener("click", async function () {
+          await toggleLocalAudio();
         });
 
         cameraButton.addEventListener("click", async function () {
-          if (!callObject) return;
-          try {
-            localVideoEnabled = !localVideoEnabled;
-            await callObject.setLocalVideo(localVideoEnabled);
-            updateControlLabels();
-            renderParticipants();
-            post("camera-changed", { cameraOff: !localVideoEnabled });
-          } catch (error) {
-            localVideoEnabled = !localVideoEnabled;
-            post("error", { message: extractMessage(error) });
-          }
+          await toggleLocalVideo();
         });
 
         endButton.addEventListener("click", function () {
-          post("end-requested");
+          requestEnd("user");
         });
 
         window.addEventListener("message", async function (event) {
@@ -812,6 +959,21 @@
 
           if (payload.type === "ui-state") {
             applyUiState(payload);
+            return;
+          }
+
+          if (payload.type === "toggle-mute") {
+            await toggleLocalAudio();
+            return;
+          }
+
+          if (payload.type === "toggle-camera") {
+            await toggleLocalVideo();
+            return;
+          }
+
+          if (payload.type === "end-call") {
+            requestEnd("flutter-control");
             return;
           }
 
@@ -838,8 +1000,11 @@
             activeRoomUrl = nextRoomUrl;
             activeMeetingToken = nextMeetingToken;
             hasJoinedMeeting = false;
+            joinedEventPosted = false;
+            terminalEventPosted = false;
             endingFromParent = false;
             await leaveCurrentCall();
+            resetTimer();
             updateStatusBanner();
             await startJoin();
           }
@@ -848,6 +1013,9 @@
         updateControlLabels();
         updateStatusBanner();
         updateTimerDisplay();
+        if (externalControlsEnabled && bottomControls) {
+          bottomControls.style.display = "none";
+        }
 
         window.addEventListener("load", function () {
           post("wrapper-ready");

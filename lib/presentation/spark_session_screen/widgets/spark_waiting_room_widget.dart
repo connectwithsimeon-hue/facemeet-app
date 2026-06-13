@@ -451,7 +451,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         final u2 = session['user_2_ready'] == true;
         final roomUrl = session['daily_room_url'] as String?;
         debugPrint(
-          'SPARK WAITING ROOM: immediate ready check — user_1_ready=$u1, user_2_ready=$u2, roomUrl=$roomUrl',
+          'SPARK WAITING ROOM: immediate ready check — user_1_ready=$u1, user_2_ready=$u2, room URL exists=${roomUrl != null && roomUrl.isNotEmpty}',
         );
         if (u1 && u2 && roomUrl != null) {
           debugPrint(

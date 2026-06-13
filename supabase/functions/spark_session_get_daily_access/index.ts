@@ -165,6 +165,19 @@ async function fetchSessionByKey(
   return (data ?? null) as SparkSessionRow | null;
 }
 
+async function fetchSessionByKeyWithRetry(
+  adminClient: SupabaseClient,
+  matchId: string,
+  sessionKey: string,
+) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const session = await fetchSessionByKey(adminClient, matchId, sessionKey);
+    if (session) return session;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
 async function claimOrReuseSessionKey(
   adminClient: SupabaseClient,
   matchId: string,
@@ -303,10 +316,10 @@ async function ensureSessionAccess(params: {
   callerUserId: string;
   requestedSessionKey: string | null;
 }) {
-  const preferredKey = params.requestedSessionKey || params.match.current_session_key;
+  const preferredKey = params.match.current_session_key;
 
   if (preferredKey) {
-    const session = await fetchSessionByKey(
+    const session = await fetchSessionByKeyWithRetry(
       params.adminClient,
       params.match.id,
       preferredKey,
@@ -320,19 +333,6 @@ async function ensureSessionAccess(params: {
           currentKey,
         );
 
-        const refreshedMatch = await fetchMatch(params.adminClient, params.match.id);
-        return await ensureSessionAccess({
-          ...params,
-          match: refreshedMatch,
-          requestedSessionKey: null,
-        });
-      }
-
-      if (
-        params.requestedSessionKey &&
-        currentKey &&
-        currentKey !== params.requestedSessionKey
-      ) {
         const refreshedMatch = await fetchMatch(params.adminClient, params.match.id);
         return await ensureSessionAccess({
           ...params,
@@ -378,7 +378,7 @@ async function ensureSessionAccess(params: {
   const keyClaim = await claimOrReuseSessionKey(params.adminClient, params.match.id);
 
   if (!keyClaim.claimed) {
-    const reusedSession = await fetchSessionByKey(
+    const reusedSession = await fetchSessionByKeyWithRetry(
       params.adminClient,
       params.match.id,
       keyClaim.sessionKey,

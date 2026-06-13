@@ -98,7 +98,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     // Fix 4: record when the call screen opened
     _callScreenStartTime = DateTime.now();
     debugPrint(
-      'SPARK VIDEO CALL: initState — roomUrl=${widget.roomUrl}, token_present=${widget.meetingToken.isNotEmpty}, matchId=${widget.matchId}, platform=${kIsWeb ? "web" : "native"}, screenStartTime=$_callScreenStartTime',
+      'SPARK VIDEO CALL: initState — room URL present=${widget.roomUrl.isNotEmpty}, token_present=${widget.meetingToken.isNotEmpty}, matchId=${widget.matchId}, platform=${kIsWeb ? "web" : "native"}, screenStartTime=$_callScreenStartTime',
     );
 
     _timerPulseCtrl = AnimationController(
@@ -332,7 +332,9 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
         _callConnecting = false;
         _callActive = true;
       });
-      startCountdown();
+      if (!kIsWeb) {
+        startCountdown();
+      }
     }
     _checkAndMarkFullyConnected();
   }
@@ -399,7 +401,9 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
   }
 
   Future<void> _retryConnection() async {
-    debugPrint('SPARK VIDEO CALL: retrying connection to ${widget.roomUrl}');
+    debugPrint(
+      'SPARK VIDEO CALL: retrying connection — room URL present=${widget.roomUrl.isNotEmpty}',
+    );
     if (!mounted) return;
     setState(() {
       _callConnecting = true;
@@ -531,11 +535,11 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     }
   }
 
-  Future<void> _endCall() async {
+  Future<void> _endCall({bool enforceMinimumStay = true}) async {
     if (_callEnded) return;
 
     // Fix 4: enforce minimum stay duration
-    if (_callScreenStartTime != null) {
+    if (enforceMinimumStay && _callScreenStartTime != null) {
       final elapsed = DateTime.now()
           .difference(_callScreenStartTime!)
           .inSeconds;
@@ -577,6 +581,30 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
 
   Future<void> _toggleCamera() async {
     setState(() => _isCameraOff = !_isCameraOff);
+  }
+
+  void _onWebMuteChanged(bool muted) {
+    if (!mounted || _isMuted == muted) return;
+    setState(() => _isMuted = muted);
+  }
+
+  void _onWebCameraChanged(bool cameraOff) {
+    if (!mounted || _isCameraOff == cameraOff) return;
+    setState(() => _isCameraOff = cameraOff);
+  }
+
+  void _sendWebToggleMute() {
+    setState(() => _isMuted = !_isMuted);
+    _webViewKey.currentState?.sendToggleMuteCommand();
+  }
+
+  void _sendWebToggleCamera() {
+    setState(() => _isCameraOff = !_isCameraOff);
+    _webViewKey.currentState?.sendToggleCameraCommand();
+  }
+
+  void _sendWebEndCall() {
+    _webViewKey.currentState?.sendEndCallCommand();
   }
 
   String get _timerDisplay {
@@ -625,7 +653,9 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
                 // Fix 1: onConnected maps to _onCallStateJoined (not _onCallConnected)
                 onConnected: _onCallStateJoined,
                 onRemoteParticipantJoined: _onRemoteParticipantJoined,
-                onEndRequested: _endCall,
+                onEndRequested: () => _endCall(enforceMinimumStay: false),
+                onMuteChanged: _onWebMuteChanged,
+                onCameraChanged: _onWebCameraChanged,
                 // Fix 3: errors shown as overlay, not closing the call
                 onError: _onDailyError,
                 showFaceMeetTimer: _callFullyConnected,
@@ -802,6 +832,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
                   ),
                 ),
               ),
+            if (kIsWeb) _buildWebOverlayControls(),
             // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
             if (_showErrorOverlay) _buildErrorOverlay(),
           ],
@@ -847,6 +878,46 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebOverlayControls() {
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _ControlButton(
+                icon: _isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                label: _isMuted ? 'Unmute' : 'Mute',
+                onTap: _sendWebToggleMute,
+                isActive: _isMuted,
+              ),
+              _ControlButton(
+                icon: Icons.call_end_rounded,
+                label: 'End',
+                onTap: _sendWebEndCall,
+                isDestructive: true,
+                size: 64,
+              ),
+              _ControlButton(
+                icon: _isCameraOff
+                    ? Icons.videocam_off_rounded
+                    : Icons.videocam_rounded,
+                label: _isCameraOff ? 'Camera On' : 'Camera Off',
+                onTap: _sendWebToggleCamera,
+                isActive: _isCameraOff,
+              ),
+            ],
+          ),
         ),
       ),
     );
