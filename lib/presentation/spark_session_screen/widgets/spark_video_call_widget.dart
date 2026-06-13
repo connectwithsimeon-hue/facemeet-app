@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/supabase_service.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/user_safety_actions.dart';
 import './spark_video_webview_stub.dart'
     if (dart.library.io) './spark_video_webview_native.dart';
 
@@ -16,6 +17,8 @@ import '../../../services/daily_call_web.dart'
     if (dart.library.io) '../../../services/daily_call_io.dart';
 
 // WebView — only on non-web platforms (conditional import for web safety)
+
+enum _LiveSafetyAction { report, block, endAndReport, endAndBlock }
 
 class SparkVideoCallWidget extends StatefulWidget {
   final String roomUrl;
@@ -607,6 +610,88 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     _webViewKey.currentState?.sendEndCallCommand();
   }
 
+  String? get _reportedUserId {
+    final rawId = widget.otherUser['id']?.toString().trim();
+    if (rawId == null || rawId.isEmpty) return null;
+    return rawId;
+  }
+
+  String get _reportedUserName {
+    final name = widget.otherUser['name']?.toString().trim();
+    if (name == null || name.isEmpty) return 'your match';
+    return name;
+  }
+
+  String? get _sparkSessionReportContext {
+    final parts = <String>[];
+    final matchId = widget.matchId?.trim();
+    final sessionKey = widget.sessionKey?.trim();
+    if (matchId != null && matchId.isNotEmpty) {
+      parts.add('match_id: $matchId');
+    }
+    if (sessionKey != null && sessionKey.isNotEmpty) {
+      parts.add('session_key: $sessionKey');
+    }
+    if (parts.isEmpty) return null;
+    return 'Spark Session context\n${parts.join('\n')}';
+  }
+
+  Future<void> _reportLiveSessionUser({required bool endAfter}) async {
+    final reportedUserId = _reportedUserId;
+    if (reportedUserId == null) {
+      _showSafetyUnavailableMessage();
+      return;
+    }
+
+    final submitted = await showReportUserSheet(
+      context,
+      reportedUserId: reportedUserId,
+      reportedUserName: _reportedUserName,
+      source: 'spark_session',
+      matchId: widget.matchId,
+      contextNote: _sparkSessionReportContext,
+    );
+    if (!submitted || !mounted) return;
+
+    if (endAfter) {
+      await _endCall(enforceMinimumStay: false);
+    }
+  }
+
+  Future<void> _blockLiveSessionUser({required bool endAfter}) async {
+    final blockedUserId = _reportedUserId;
+    if (blockedUserId == null) {
+      _showSafetyUnavailableMessage();
+      return;
+    }
+
+    final blocked = await showBlockUserDialog(
+      context,
+      blockedUserId: blockedUserId,
+      blockedUserName: _reportedUserName,
+      source: 'spark_session',
+      matchId: widget.matchId,
+    );
+    if (!blocked || !mounted) return;
+
+    if (endAfter || _callActive || _callFullyConnected) {
+      await _endCall(enforceMinimumStay: false);
+    }
+  }
+
+  void _showSafetyUnavailableMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Safety action is unavailable for this session.',
+          style: GoogleFonts.dmSans(),
+        ),
+        backgroundColor: AppTheme.error,
+      ),
+    );
+  }
+
   String get _timerDisplay {
     final m = _secondsRemaining ~/ 60;
     final s = _secondsRemaining % 60;
@@ -833,6 +918,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
                 ),
               ),
             if (kIsWeb) _buildWebOverlayControls(),
+            _buildLiveSafetyMenu(),
             // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
             if (_showErrorOverlay) _buildErrorOverlay(),
           ],
@@ -846,6 +932,119 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     return GestureDetector(
       onTap: () => setState(() => _showControls = !_showControls),
       child: content,
+    );
+  }
+
+  Widget _buildLiveSafetyMenu() {
+    return Positioned(
+      top: 0,
+      right: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 12, 16, 0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: PopupMenuButton<_LiveSafetyAction>(
+                tooltip: 'Safety',
+                color: const Color(0xFF1A1A1E),
+                elevation: 12,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.white.withAlpha(24)),
+                ),
+                offset: const Offset(0, 48),
+                onSelected: (action) {
+                  switch (action) {
+                    case _LiveSafetyAction.report:
+                      _reportLiveSessionUser(endAfter: false);
+                      break;
+                    case _LiveSafetyAction.block:
+                      _blockLiveSessionUser(endAfter: true);
+                      break;
+                    case _LiveSafetyAction.endAndReport:
+                      _reportLiveSessionUser(endAfter: true);
+                      break;
+                    case _LiveSafetyAction.endAndBlock:
+                      _blockLiveSessionUser(endAfter: true);
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  _safetyMenuItem(
+                    value: _LiveSafetyAction.report,
+                    icon: Icons.flag_outlined,
+                    label: 'Report User',
+                  ),
+                  _safetyMenuItem(
+                    value: _LiveSafetyAction.block,
+                    icon: Icons.block_rounded,
+                    label: 'Block User',
+                    destructive: true,
+                  ),
+                  const PopupMenuDivider(height: 8),
+                  _safetyMenuItem(
+                    value: _LiveSafetyAction.endAndReport,
+                    icon: Icons.report_gmailerrorred_rounded,
+                    label: 'End and Report',
+                    destructive: true,
+                  ),
+                  _safetyMenuItem(
+                    value: _LiveSafetyAction.endAndBlock,
+                    icon: Icons.phone_disabled_rounded,
+                    label: 'End and Block',
+                    destructive: true,
+                  ),
+                ],
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(86),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withAlpha(46),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.shield_outlined,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  PopupMenuEntry<_LiveSafetyAction> _safetyMenuItem({
+    required _LiveSafetyAction value,
+    required IconData icon,
+    required String label,
+    bool destructive = false,
+  }) {
+    final color = destructive ? AppTheme.error : Colors.white;
+    return PopupMenuItem<_LiveSafetyAction>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 19),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

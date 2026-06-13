@@ -19,6 +19,7 @@ class UserSafetyActionButtons extends StatelessWidget {
   final String reportedUserName;
   final String source;
   final String? matchId;
+  final String? contextNote;
   final VoidCallback? onReported;
   final VoidCallback? onBlocked;
   final Axis direction;
@@ -29,6 +30,7 @@ class UserSafetyActionButtons extends StatelessWidget {
     required this.reportedUserName,
     required this.source,
     this.matchId,
+    this.contextNote,
     this.onReported,
     this.onBlocked,
     this.direction = Axis.horizontal,
@@ -47,6 +49,7 @@ class UserSafetyActionButtons extends StatelessWidget {
             reportedUserName: reportedUserName,
             source: source,
             matchId: matchId,
+            contextNote: contextNote,
           );
           if (submitted) onReported?.call();
         },
@@ -91,6 +94,7 @@ Future<bool> showReportUserSheet(
   required String reportedUserName,
   required String source,
   String? matchId,
+  String? contextNote,
 }) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
@@ -101,6 +105,7 @@ Future<bool> showReportUserSheet(
       reportedUserName: reportedUserName,
       source: source,
       matchId: matchId,
+      contextNote: contextNote,
     ),
   );
   return result == true;
@@ -193,12 +198,14 @@ class _ReportUserSheet extends StatefulWidget {
   final String reportedUserName;
   final String source;
   final String? matchId;
+  final String? contextNote;
 
   const _ReportUserSheet({
     required this.reportedUserId,
     required this.reportedUserName,
     required this.source,
     this.matchId,
+    this.contextNote,
   });
 
   @override
@@ -223,9 +230,7 @@ class _ReportUserSheetState extends State<_ReportUserSheet> {
       await SupabaseService.instance.submitUserReport(
         reportedUserId: widget.reportedUserId,
         reason: _reason,
-        details: _detailsCtrl.text.trim().isEmpty
-            ? null
-            : _detailsCtrl.text.trim(),
+        details: _combinedDetails,
         source: widget.source,
         matchId: widget.matchId,
       );
@@ -255,6 +260,17 @@ class _ReportUserSheetState extends State<_ReportUserSheet> {
         );
       }
     }
+  }
+
+  String? get _combinedDetails {
+    final contextNote = widget.contextNote?.trim();
+    final userDetails = _detailsCtrl.text.trim();
+    if ((contextNote == null || contextNote.isEmpty) && userDetails.isEmpty) {
+      return null;
+    }
+    if (contextNote == null || contextNote.isEmpty) return userDetails;
+    if (userDetails.isEmpty) return contextNote;
+    return '$contextNote\n\nUser details:\n$userDetails';
   }
 
   @override

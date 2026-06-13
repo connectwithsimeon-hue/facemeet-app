@@ -10,6 +10,7 @@ import '../../routes/app_routes.dart';
 import '../../theme/app_theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/web_push_notification_service.dart';
+import '../../widgets/user_safety_actions.dart';
 import './widgets/spark_decision_widget.dart';
 import './widgets/spark_video_call_widget.dart';
 import './widgets/spark_waiting_room_widget.dart';
@@ -906,6 +907,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     final p = _otherUserProfile;
     if (p == null) {
       return {
+        'id': _matchedUserId,
         'name': 'Your Match',
         'age': 0,
         'city': '',
@@ -915,6 +917,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
       };
     }
     return {
+      'id': _matchedUserId ?? p['id'],
       'name': p['first_name'] ?? 'Your Match',
       'age': p['age'] ?? 0,
       'city': p['city'] ?? '',
@@ -989,6 +992,8 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
           mutualSpark: _mutualSpark,
           waitingForOtherDecision: _waitingForOtherDecision,
           otherUser: _safeOtherUser,
+          matchId: _matchId,
+          sessionKey: _sessionKey,
           onGoToChat: () => Navigator.pushNamed(
             context,
             AppRoutes.chatScreen,
@@ -1329,6 +1334,8 @@ class _SparkOutcomeWidget extends StatelessWidget {
   final bool mutualSpark;
   final bool waitingForOtherDecision;
   final Map<String, dynamic> otherUser;
+  final String? matchId;
+  final String? sessionKey;
   final VoidCallback onGoToChat;
   final VoidCallback onDiscover;
 
@@ -1336,6 +1343,8 @@ class _SparkOutcomeWidget extends StatelessWidget {
     required this.mutualSpark,
     required this.waitingForOtherDecision,
     required this.otherUser,
+    this.matchId,
+    this.sessionKey,
     required this.onGoToChat,
     required this.onDiscover,
   });
@@ -1343,6 +1352,8 @@ class _SparkOutcomeWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = otherUser['name'] as String? ?? 'Your Match';
+    final otherUserId = otherUser['id']?.toString().trim();
+    final safetyContext = _sparkSessionReportContext;
     return Container(
       decoration: BoxDecoration(
         gradient: RadialGradient(
@@ -1452,10 +1463,38 @@ class _SparkOutcomeWidget extends StatelessWidget {
                     ),
                   ),
                 ),
+              if (!waitingForOtherDecision &&
+                  otherUserId != null &&
+                  otherUserId.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                UserSafetyActionButtons(
+                  reportedUserId: otherUserId,
+                  reportedUserName: name,
+                  source: 'spark_session',
+                  matchId: matchId,
+                  contextNote: safetyContext,
+                  direction: Axis.horizontal,
+                  onBlocked: onDiscover,
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  String? get _sparkSessionReportContext {
+    final parts = <String>[];
+    final cleanMatchId = matchId?.trim();
+    final cleanSessionKey = sessionKey?.trim();
+    if (cleanMatchId != null && cleanMatchId.isNotEmpty) {
+      parts.add('match_id: $cleanMatchId');
+    }
+    if (cleanSessionKey != null && cleanSessionKey.isNotEmpty) {
+      parts.add('session_key: $cleanSessionKey');
+    }
+    if (parts.isEmpty) return null;
+    return 'Spark Session context\n${parts.join('\n')}';
   }
 }
