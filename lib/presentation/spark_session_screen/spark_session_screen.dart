@@ -211,7 +211,10 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         );
         if (mounted) {
           setState(() {
-            _otherUserProfile = profile;
+            _otherUserProfile = SupabaseService.instance
+                .isUserFacingProfileAvailable(profile)
+                ? profile
+                : null;
             _loadingProfile = false;
           });
         }

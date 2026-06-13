@@ -261,6 +261,9 @@ class ChatScreenState extends State<ChatScreen> {
           ? match['user_2_id'] as String
           : match['user_1_id'] as String;
       final profile = await SupabaseService.instance.getUserProfile(otherId);
+      if (!SupabaseService.instance.isUserFacingProfileAvailable(profile)) {
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _activeConversation = {

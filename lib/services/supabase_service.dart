@@ -247,6 +247,27 @@ class SupabaseService {
     return response;
   }
 
+  bool isUserFacingProfileAvailable(Map<String, dynamic>? profile) {
+    if (profile == null) return false;
+    final accountStatus =
+        profile['account_status']?.toString().trim().toLowerCase() ??
+        'active';
+    final visibilityStatus =
+        profile['profile_visibility_status']?.toString().trim().toLowerCase() ??
+        'visible';
+    final moderationStatus =
+        profile['moderation_status']?.toString().trim().toLowerCase() ?? '';
+
+    return accountStatus == 'active' &&
+        visibilityStatus == 'visible' &&
+        moderationStatus == 'approved';
+  }
+
+  Future<bool> isUserFacingProfileAvailableById(String userId) async {
+    final profile = await getUserProfile(userId);
+    return isUserFacingProfileAvailable(profile);
+  }
+
   /// Update current user's profile
   Future<void> updateUserProfile(Map<String, dynamic> data) async {
     final uid = currentUserId;
@@ -429,6 +450,8 @@ class SupabaseService {
         .select()
         .eq('onboarding_complete', true)
         .eq('moderation_status', 'approved')
+        .eq('account_status', 'active')
+        .eq('profile_visibility_status', 'visible')
         .neq('id', uid);
 
     if (interactedIds.isNotEmpty) {
@@ -993,11 +1016,12 @@ class SupabaseService {
         .or('user_1_id.eq.$uid,user_2_id.eq.$uid')
         .order('created_at', ascending: false);
 
-    return _excludeBlockedMatches(
+    final visibleMatches = _excludeBlockedMatches(
       List<Map<String, dynamic>>.from(response as List),
       uid,
       await getBlockedUserIdsForCurrentUser(),
     );
+    return _excludeUnavailableMatches(visibleMatches, uid);
   }
 
   /// Get pending mutual matches (matched_pending_session or session_expired) for current user.
@@ -1016,11 +1040,12 @@ class SupabaseService {
         .neq('status', 'chat_unlocked')
         .order('created_at', ascending: false);
 
-    return _excludeBlockedMatches(
+    final visibleMatches = _excludeBlockedMatches(
       List<Map<String, dynamic>>.from(response as List),
       uid,
       await getBlockedUserIdsForCurrentUser(),
     );
+    return _excludeUnavailableMatches(visibleMatches, uid);
   }
 
   /// Get chat-unlocked matches for current user
@@ -1035,11 +1060,12 @@ class SupabaseService {
         .eq('status', 'chat_unlocked')
         .order('created_at', ascending: false);
 
-    return _excludeBlockedMatches(
+    final visibleMatches = _excludeBlockedMatches(
       List<Map<String, dynamic>>.from(response as List),
       uid,
       await getBlockedUserIdsForCurrentUser(),
     );
+    return _excludeUnavailableMatches(visibleMatches, uid);
   }
 
   List<Map<String, dynamic>> _excludeBlockedMatches(
@@ -1054,6 +1080,24 @@ class SupabaseService {
       final otherUserId = user1 == uid ? user2 : user1;
       return otherUserId == null || !blockedUserIds.contains(otherUserId);
     }).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _excludeUnavailableMatches(
+    List<Map<String, dynamic>> matches,
+    String uid,
+  ) async {
+    final visibleMatches = <Map<String, dynamic>>[];
+    for (final match in matches) {
+      final user1 = match['user_1_id'] as String?;
+      final user2 = match['user_2_id'] as String?;
+      final otherUserId = user1 == uid ? user2 : user1;
+      if (otherUserId == null) continue;
+
+      if (await isUserFacingProfileAvailableById(otherUserId)) {
+        visibleMatches.add(match);
+      }
+    }
+    return visibleMatches;
   }
 
   /// Update match status
