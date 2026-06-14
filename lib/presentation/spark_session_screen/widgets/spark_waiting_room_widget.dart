@@ -10,6 +10,7 @@ import '../../../services/supabase_service.dart';
 import '../../../services/web_push_notification_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/profile_avatar.dart';
+import '../../../widgets/user_safety_actions.dart';
 
 class SparkWaitingRoomWidget extends StatefulWidget {
   final Map<String, dynamic> otherUser;
@@ -937,6 +938,170 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     return name.split(' ').first;
   }
 
+  String? get _otherUserId {
+    final id = widget.otherUser['id']?.toString().trim();
+    return id == null || id.isEmpty ? null : id;
+  }
+
+  String get _otherUserName {
+    return widget.otherUser['name'] as String? ?? 'Your Match';
+  }
+
+  void _closeWaitingRoom() {
+    _cancelTimers();
+    if (mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _reportWaitingRoomUser({required bool endAfter}) async {
+    final userId = _otherUserId;
+    if (userId == null) return;
+
+    final submitted = await showReportUserSheet(
+      context,
+      reportedUserId: userId,
+      reportedUserName: _otherUserName,
+      source: 'spark_session',
+      matchId: widget.matchId,
+      contextNote: 'Report submitted from Spark Session waiting room.',
+    );
+    if (submitted && endAfter) {
+      _closeWaitingRoom();
+    }
+  }
+
+  Future<void> _blockWaitingRoomUser() async {
+    final userId = _otherUserId;
+    if (userId == null) return;
+
+    final blocked = await showBlockUserDialog(
+      context,
+      blockedUserId: userId,
+      blockedUserName: _otherUserName,
+      source: 'spark_session',
+      matchId: widget.matchId,
+    );
+    if (blocked) {
+      _closeWaitingRoom();
+    }
+  }
+
+  Widget _buildWaitingRoomSafetyMenu() {
+    if (_otherUserId == null) return const SizedBox.shrink();
+
+    return Positioned(
+      top: 0,
+      right: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 12, 16, 0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: PopupMenuButton<String>(
+                tooltip: 'Safety',
+                color: const Color(0xFF1A1A1E),
+                elevation: 12,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.white.withAlpha(24)),
+                ),
+                offset: const Offset(0, 48),
+                onSelected: (action) {
+                  switch (action) {
+                    case 'report':
+                      _reportWaitingRoomUser(endAfter: false);
+                      break;
+                    case 'block':
+                      _blockWaitingRoomUser();
+                      break;
+                    case 'end_report':
+                      _reportWaitingRoomUser(endAfter: true);
+                      break;
+                    case 'end_block':
+                      _blockWaitingRoomUser();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  _waitingRoomSafetyMenuItem(
+                    value: 'report',
+                    icon: Icons.flag_outlined,
+                    label: 'Report User',
+                  ),
+                  _waitingRoomSafetyMenuItem(
+                    value: 'block',
+                    icon: Icons.block_rounded,
+                    label: 'Block User',
+                    destructive: true,
+                  ),
+                  const PopupMenuDivider(height: 8),
+                  _waitingRoomSafetyMenuItem(
+                    value: 'end_report',
+                    icon: Icons.report_gmailerrorred_rounded,
+                    label: 'End and Report',
+                    destructive: true,
+                  ),
+                  _waitingRoomSafetyMenuItem(
+                    value: 'end_block',
+                    icon: Icons.phone_disabled_rounded,
+                    label: 'End and Block',
+                    destructive: true,
+                  ),
+                ],
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(86),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withAlpha(46),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.shield_outlined,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  PopupMenuEntry<String> _waitingRoomSafetyMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    bool destructive = false,
+  }) {
+    final color = destructive ? AppTheme.error : Colors.white;
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 19),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -947,259 +1112,198 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           colors: [Color(0x22FF4458), Color(0xFF0D0D0F)],
         ),
       ),
-      child: SafeArea(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Pulse rings + avatar
-            AnimatedBuilder(
-              animation: _pulseCtrl,
-              builder: (context, child) {
-                return SizedBox(
-                  width: 240,
-                  height: 240,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Transform.scale(
-                        scale: _pulse3.value,
-                        child: Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.primary.withOpacity(
-                                (1 - _pulseCtrl.value * 0.8).clamp(0, 0.15),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          SafeArea(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Pulse rings + avatar
+                AnimatedBuilder(
+                  animation: _pulseCtrl,
+                  builder: (context, child) {
+                    return SizedBox(
+                      width: 240,
+                      height: 240,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Transform.scale(
+                            scale: _pulse3.value,
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primary.withOpacity(
+                                    (1 - _pulseCtrl.value * 0.8).clamp(0, 0.15),
+                                  ),
+                                  width: 1.5,
+                                ),
                               ),
-                              width: 1.5,
                             ),
                           ),
-                        ),
-                      ),
-                      Transform.scale(
-                        scale: _pulse2.value,
-                        child: Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.primary.withOpacity(
-                                (1 - _pulseCtrl.value * 0.7).clamp(0, 0.25),
+                          Transform.scale(
+                            scale: _pulse2.value,
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primary.withOpacity(
+                                    (1 - _pulseCtrl.value * 0.7).clamp(0, 0.25),
+                                  ),
+                                  width: 1.5,
+                                ),
                               ),
-                              width: 1.5,
                             ),
                           ),
-                        ),
-                      ),
-                      Transform.scale(
-                        scale: _pulse1.value,
-                        child: Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.primary.withOpacity(
-                                (1 - _pulseCtrl.value * 0.5).clamp(0, 0.4),
+                          Transform.scale(
+                            scale: _pulse1.value,
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primary.withOpacity(
+                                    (1 - _pulseCtrl.value * 0.5).clamp(0, 0.4),
+                                  ),
+                                  width: 2,
+                                ),
                               ),
-                              width: 2,
                             ),
                           ),
-                        ),
+                          child!,
+                        ],
                       ),
-                      child!,
-                    ],
-                  ),
-                );
-              },
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(50),
-                  border: Border.all(color: AppTheme.primary, width: 2.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primary.withAlpha(77),
-                      blurRadius: 20,
+                    );
+                  },
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(50),
+                      border: Border.all(color: AppTheme.primary, width: 2.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primary.withAlpha(77),
+                          blurRadius: 20,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(48),
-                  child: ProfileAvatar(
-                    thumbnailUrl: widget.otherUser['thumbnailUrl'] as String?,
-                    firstName: widget.otherUser['name'] as String?,
-                    radius: 48,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-            Text(
-              widget.otherUser['name'] as String? ?? 'Your Match',
-              style: GoogleFonts.dmSans(
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if ((widget.otherUser['age'] as int? ?? 0) > 0)
-              Text(
-                '${widget.otherUser['age']}',
-                style: GoogleFonts.dmSans(
-                  fontSize: 16,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            const SizedBox(height: 8),
-            if ((widget.otherUser['city'] as String? ?? '').isNotEmpty)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.location_on_rounded,
-                    color: AppTheme.textMuted,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    widget.otherUser['city'] as String,
-                    style: GoogleFonts.dmSans(
-                      fontSize: 14,
-                      color: AppTheme.textMuted,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(48),
+                      child: ProfileAvatar(
+                        thumbnailUrl:
+                            widget.otherUser['thumbnailUrl'] as String?,
+                        firstName: widget.otherUser['name'] as String?,
+                        radius: 48,
+                      ),
                     ),
                   ),
-                ],
-              ),
-            const SizedBox(height: 32),
-            // Status card
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceGlass,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.borderGlass, width: 1),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_isCreatingRoom)
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: AppTheme.primary,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      else if (_errorMessage != null)
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          color: AppTheme.warning,
-                          size: 20,
-                        )
-                      else
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: AppTheme.primary,
-                            strokeWidth: 2,
-                          ),
-                        ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          _isCreatingRoom
-                              ? 'Setting up your Spark Session...'
-                              : _errorMessage != null
-                              ? _errorMessage!
-                              : 'Waiting for $_otherFirstName to join${'.' * ((_dotCount % 3) + 1)}',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 14,
-                            color: _errorMessage != null
-                                ? AppTheme.warning
-                                : AppTheme.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
-              ),
-            ),
-            // Fix 3: Retry button shown when Daily.co room creation fails
-            if (_errorMessage != null && !_isCreatingRoom) ...[
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _retryRoomCreation,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: Text(
-                  'Retry',
+                const SizedBox(height: 32),
+                Text(
+                  widget.otherUser['name'] as String? ?? 'Your Match',
                   style: GoogleFonts.dmSans(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
                   ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 28,
-                    vertical: 12,
+                const SizedBox(height: 8),
+                if ((widget.otherUser['age'] as int? ?? 0) > 0)
+                  Text(
+                    '${widget.otherUser['age']}',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 16,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 8),
+                if ((widget.otherUser['city'] as String? ?? '').isNotEmpty)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.location_on_rounded,
+                        color: AppTheme.textMuted,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        widget.otherUser['city'] as String,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-            if (_roomReady && !_isCreatingRoom && _errorMessage == null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 32),
+                // Status card
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
                   child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
+                        horizontal: 24,
+                        vertical: 16,
                       ),
                       decoration: BoxDecoration(
-                        color: AppTheme.sparkGreen.withAlpha(20),
-                        borderRadius: BorderRadius.circular(12),
+                        color: AppTheme.surfaceGlass,
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: AppTheme.sparkGreen.withAlpha(60),
+                          color: AppTheme.borderGlass,
                           width: 1,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.check_circle_rounded,
-                            color: AppTheme.sparkGreen,
-                            size: 14,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "You're ready — waiting for $_otherFirstName",
-                            style: GoogleFonts.dmSans(
-                              fontSize: 12,
-                              color: AppTheme.sparkGreen,
+                          if (_isCreatingRoom)
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: AppTheme.primary,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          else if (_errorMessage != null)
+                            const Icon(
+                              Icons.warning_amber_rounded,
+                              color: AppTheme.warning,
+                              size: 20,
+                            )
+                          else
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: AppTheme.primary,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Text(
+                              _isCreatingRoom
+                                  ? 'Setting up your Spark Session...'
+                                  : _errorMessage != null
+                                  ? _errorMessage!
+                                  : 'Waiting for $_otherFirstName to join${'.' * ((_dotCount % 3) + 1)}',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 14,
+                                color: _errorMessage != null
+                                    ? AppTheme.warning
+                                    : AppTheme.textSecondary,
+                              ),
                             ),
                           ),
                         ],
@@ -1207,31 +1311,102 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
                     ),
                   ),
                 ),
-              ),
-            const SizedBox(height: 48),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.timer_outlined,
-                    color: AppTheme.textMuted,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '3-minute Spark Session',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 13,
-                      color: AppTheme.textMuted,
+                // Fix 3: Retry button shown when Daily.co room creation fails
+                if (_errorMessage != null && !_isCreatingRoom) ...[
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _retryRoomCreation,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: Text(
+                      'Retry',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 28,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ],
-              ),
+                const SizedBox(height: 20),
+                if (_roomReady && !_isCreatingRoom && _errorMessage == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.sparkGreen.withAlpha(20),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.sparkGreen.withAlpha(60),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.check_circle_rounded,
+                                color: AppTheme.sparkGreen,
+                                size: 14,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                "You're ready — waiting for $_otherFirstName",
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 12,
+                                  color: AppTheme.sparkGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 48),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.timer_outlined,
+                        color: AppTheme.textMuted,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '3-minute Spark Session',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          _buildWaitingRoomSafetyMenu(),
+        ],
       ),
     );
   }

@@ -256,6 +256,12 @@ class DailyCallViewState extends State<DailyCallView> {
             });
         if (mounted) setState(() => _loading = false);
         widget.onCallConnected?.call();
+        _notifyRemoteParticipantIfPresent('joined-state');
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 750), () {
+            _notifyRemoteParticipantIfPresent('joined-state-delayed');
+          }),
+        );
       } else if (isLeft) {
         debugPrint('DAILY CALL VIEW: call left — triggering onCallEnded');
         widget.onCallEnded();
@@ -283,13 +289,7 @@ class DailyCallViewState extends State<DailyCallView> {
         debugPrint(
           'DAILY CALL VIEW: remote participant updated — id=${p.id}, hasVideoTrack=$hasVideo',
         );
-        // If remote participant's video track becomes active, fire onRemoteParticipantJoined
-        if (hasVideo) {
-          debugPrint(
-            'DAILY CALL VIEW: remote participant video track active — firing onRemoteParticipantJoined',
-          );
-          widget.onRemoteParticipantJoined?.call();
-        }
+        _notifyRemoteParticipantIfPresent('participant-updated');
       }
       if (mounted) setState(() {});
     }
@@ -297,6 +297,23 @@ class DailyCallViewState extends State<DailyCallView> {
     if (event is ParticipantLeftEvent) {
       debugPrint('DAILY CALL VIEW: remote participant left');
       if (mounted) setState(() {});
+    }
+  }
+
+  void _notifyRemoteParticipantIfPresent(String source) {
+    final client = _client;
+    if (client == null) return;
+
+    final remoteCount = client.participants.all.values
+        .where((participant) => !participant.info.isLocal)
+        .length;
+
+    debugPrint(
+      'DAILY CALL VIEW: remote participant check ($source) — remoteCount=$remoteCount',
+    );
+
+    if (remoteCount > 0) {
+      widget.onRemoteParticipantJoined?.call();
     }
   }
 

@@ -86,6 +86,10 @@ class PushNotificationService {
         'PUSH DEBUG: requestPermission() completed — authorizationStatus=${settings.authorizationStatus}',
       );
 
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await _requestAndroidRuntimeNotificationPermission();
+      }
+
       // On iOS, log the APNs token for diagnostics (existence only, not value).
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
         try {
@@ -269,6 +273,34 @@ class PushNotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     await androidPlugin?.createNotificationChannel(_channel);
+  }
+
+  Future<void> _requestAndroidRuntimeNotificationPermission() async {
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    if (androidPlugin == null) {
+      _log('PUSH DEBUG: Android notification permission plugin unavailable');
+      return;
+    }
+
+    try {
+      final enabledBefore = await androidPlugin.areNotificationsEnabled();
+      _log(
+        'PUSH DEBUG: Android notifications enabled before prompt: $enabledBefore',
+      );
+      final granted = await androidPlugin.requestNotificationsPermission();
+      _log(
+        'PUSH DEBUG: Android runtime notification permission granted: $granted',
+      );
+      final enabledAfter = await androidPlugin.areNotificationsEnabled();
+      _log(
+        'PUSH DEBUG: Android notifications enabled after prompt: $enabledAfter',
+      );
+    } catch (e) {
+      _log('PUSH DEBUG: Android notification permission request failed — $e');
+    }
   }
 
   void _routeFromMessage(RemoteMessage message) {
