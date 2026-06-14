@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -92,6 +93,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     required String body,
     required Map<String, dynamic> data,
   }) async {
+    var nativePushSent = false;
     try {
       const anonKey =
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZiYWlpdnN2amRudHphZmZib3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxODk2NjQsImV4cCI6MjA5MTc2NTY2NH0.ZNzIdnuQXf69nLmo7FafLASNOG6_2m36JZQKCIQzK-w';
@@ -113,9 +115,11 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         ),
       );
       debugPrint('PUSH NOTIFICATION: sent type=$type to userId=$userId');
+      nativePushSent = true;
     } catch (e) {
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
     }
+    if (!kIsWeb) return nativePushSent;
     return await WebPushNotificationService.instance.sendWebPushNotification(
       userId: userId,
       type: type,
@@ -352,7 +356,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     if (uid != null) {
       SupabaseService.instance
           .saveInteraction(toUserId: uid, actionType: 'skip')
-          .catchError((_) {});
+          .catchError((_) => null);
     }
     _advanceCard();
   }

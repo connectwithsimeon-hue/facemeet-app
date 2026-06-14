@@ -38,44 +38,53 @@ class AppNavigation extends StatelessWidget {
               border: Border.all(color: const Color(0x1AFFFFFF), width: 1),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _NavItem(
-                  icon: Icons.explore_rounded,
-                  activeIcon: Icons.explore_rounded,
-                  label: 'Discover',
-                  isActive: currentIndex == discoverTabIndex,
-                  onTap: () => onTap(discoverTabIndex),
+                Expanded(
+                  child: _NavItem(
+                    icon: Icons.explore_rounded,
+                    activeIcon: Icons.explore_rounded,
+                    label: 'Discover',
+                    isActive: currentIndex == discoverTabIndex,
+                    onTap: () => onTap(discoverTabIndex),
+                  ),
                 ),
-                _NavItem(
-                  icon: Icons.bolt_outlined,
-                  activeIcon: Icons.bolt_rounded,
-                  label: 'Sparks',
-                  isActive: currentIndex == sparksTabIndex,
-                  onTap: () => onTap(sparksTabIndex),
-                  badge: sessionsBadge > 0 ? sessionsBadge : null,
+                Expanded(
+                  child: _NavItem(
+                    icon: Icons.bolt_outlined,
+                    activeIcon: Icons.bolt_rounded,
+                    label: 'Sessions',
+                    isActive: currentIndex == sparksTabIndex,
+                    onTap: () => onTap(sparksTabIndex),
+                    badge: sessionsBadge > 0 ? sessionsBadge : null,
+                  ),
                 ),
-                _NavItem(
-                  icon: Icons.event_outlined,
-                  activeIcon: Icons.event_rounded,
-                  label: 'Events',
-                  isActive: currentIndex == eventsTabIndex,
-                  onTap: () => onTap(eventsTabIndex),
+                Expanded(
+                  child: _NavItem(
+                    icon: Icons.event_outlined,
+                    activeIcon: Icons.event_rounded,
+                    label: 'Events',
+                    isActive: currentIndex == eventsTabIndex,
+                    onTap: () => onTap(eventsTabIndex),
+                  ),
                 ),
-                _NavItem(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  activeIcon: Icons.chat_bubble_rounded,
-                  label: 'Chats',
-                  isActive: currentIndex == chatsTabIndex,
-                  onTap: () => onTap(chatsTabIndex),
-                  badge: chatBadge > 0 ? chatBadge : null,
+                Expanded(
+                  child: _NavItem(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    activeIcon: Icons.chat_bubble_rounded,
+                    label: 'Chat',
+                    isActive: currentIndex == chatsTabIndex,
+                    onTap: () => onTap(chatsTabIndex),
+                    badge: chatBadge > 0 ? chatBadge : null,
+                  ),
                 ),
-                _NavItem(
-                  icon: Icons.person_outline_rounded,
-                  activeIcon: Icons.person_rounded,
-                  label: 'Profile',
-                  isActive: currentIndex == profileTabIndex,
-                  onTap: () => onTap(profileTabIndex),
+                Expanded(
+                  child: _NavItem(
+                    icon: Icons.person_outline_rounded,
+                    activeIcon: Icons.person_rounded,
+                    label: 'Profile',
+                    isActive: currentIndex == profileTabIndex,
+                    onTap: () => onTap(profileTabIndex),
+                  ),
                 ),
               ],
             ),
@@ -145,7 +154,7 @@ class _NavItemState extends State<_NavItem>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
           decoration: BoxDecoration(
             color: widget.isActive
                 ? const Color(0x33E8503A)
