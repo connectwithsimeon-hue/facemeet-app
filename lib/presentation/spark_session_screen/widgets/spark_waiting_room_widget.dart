@@ -950,28 +950,44 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       final nativeSent = responseData is Map
           ? ((responseData['sent'] as num?)?.toInt() ?? 0) > 0
           : false;
+      final nativeTokenRows = responseData is Map
+          ? ((responseData['native_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final androidTokenRows = responseData is Map
+          ? ((responseData['android_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final nativeSentCount = responseData is Map
+          ? ((responseData['native_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final webSentCount = responseData is Map
+          ? ((responseData['web_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final edgeReason = responseData is Map
+          ? (responseData['reason']?.toString() ?? 'unknown')
+          : 'unknown';
       debugPrint('PUSH NOTIFICATION: sent type=$type to userId=$userId');
       if (!nativeSent) {
-        debugPrint('PUSH NOTIFICATION: native send returned no recipients');
+        debugPrint('PUSH NOTIFICATION: edge send returned no recipients');
       }
-      await AndroidDiagnosticsService.instance.setValue(
-        'last_push_invoke_result',
-        'type=$type, sent=${nativeSent ? 'yes' : 'no'}',
-      );
+      await AndroidDiagnosticsService.instance.setValues({
+        'last_push_invoke_result':
+            'type=$type, sent=${nativeSent ? 'yes' : 'no'}',
+        'last_push_recipient_id': AndroidDiagnosticsService.shortId(userId),
+        'last_push_token_rows_found': nativeTokenRows,
+        'last_push_android_token_rows_found': androidTokenRows,
+        'last_push_native_sent': nativeSentCount,
+        'last_push_web_sent': webSentCount,
+        'last_push_edge_reason': edgeReason,
+      });
+      return nativeSent;
     } catch (e) {
       await AndroidDiagnosticsService.instance.setValue(
         'last_push_invoke_result',
         'type=$type, error',
       );
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
+      return false;
     }
-    return await WebPushNotificationService.instance.sendWebPushNotification(
-      userId: userId,
-      type: type,
-      title: title,
-      body: body,
-      data: data,
-    );
   }
 
   String get _otherFirstName {

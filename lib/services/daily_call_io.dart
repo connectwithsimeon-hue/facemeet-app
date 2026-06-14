@@ -322,9 +322,14 @@ class DailyCallViewState extends State<DailyCallView> {
     final client = _client;
     if (client == null) return;
 
-    final remoteCount = client.participants.all.values
+    final participants = client.participants.all.values;
+    final remoteParticipants = participants
         .where((participant) => !participant.info.isLocal)
-        .length;
+        .toList();
+    final remoteCount = remoteParticipants.length;
+    final remoteIds = remoteParticipants
+        .map((participant) => AndroidDiagnosticsService.shortId(participant.id))
+        .join(',');
 
     debugPrint(
       'DAILY CALL VIEW: remote participant check ($source) — remoteCount=$remoteCount',
@@ -332,7 +337,11 @@ class DailyCallViewState extends State<DailyCallView> {
     final key = source.contains('delayed')
         ? 'remote_participant_count_delayed'
         : 'remote_participant_count_immediate';
-    AndroidDiagnosticsService.instance.setValue(key, remoteCount);
+    AndroidDiagnosticsService.instance.setValues({
+      key: remoteCount,
+      'daily_participant_total_count': participants.length,
+      'daily_remote_participant_ids': remoteIds.isEmpty ? 'none' : remoteIds,
+    });
 
     if (remoteCount > 0) {
       widget.onRemoteParticipantJoined?.call();

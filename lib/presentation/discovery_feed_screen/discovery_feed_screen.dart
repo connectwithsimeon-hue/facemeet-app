@@ -109,13 +109,34 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       nativePushSent = responseData is Map
           ? ((responseData['sent'] as num?)?.toInt() ?? 0) > 0
           : false;
+      final nativeTokenRows = responseData is Map
+          ? ((responseData['native_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final androidTokenRows = responseData is Map
+          ? ((responseData['android_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final nativeSent = responseData is Map
+          ? ((responseData['native_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final webSent = responseData is Map
+          ? ((responseData['web_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final edgeReason = responseData is Map
+          ? (responseData['reason']?.toString() ?? 'unknown')
+          : 'unknown';
       debugPrint(
         'PUSH NOTIFICATION: sent type=$type to userId=$userId, nativeSent=$nativePushSent',
       );
-      await AndroidDiagnosticsService.instance.setValue(
-        'last_push_invoke_result',
-        'type=$type, sent=${nativePushSent ? 'yes' : 'no'}',
-      );
+      await AndroidDiagnosticsService.instance.setValues({
+        'last_push_invoke_result':
+            'type=$type, sent=${nativePushSent ? 'yes' : 'no'}',
+        'last_push_recipient_id': AndroidDiagnosticsService.shortId(userId),
+        'last_push_token_rows_found': nativeTokenRows,
+        'last_push_android_token_rows_found': androidTokenRows,
+        'last_push_native_sent': nativeSent,
+        'last_push_web_sent': webSent,
+        'last_push_edge_reason': edgeReason,
+      });
     } catch (e) {
       await AndroidDiagnosticsService.instance.setValue(
         'last_push_invoke_result',
