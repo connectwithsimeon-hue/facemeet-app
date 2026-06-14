@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -903,26 +902,24 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     required Map<String, dynamic> data,
   }) async {
     try {
-      const anonKey =
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZiYWlpdnN2amRudHphZmZib3VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxODk2NjQsImV4cCI6MjA5MTc2NTY2NH0.ZNzIdnuQXf69nLmo7FafLASNOG6_2m36JZQKCIQzK-w';
-      final dio = Dio();
-      await dio.post(
-        'https://vbaiivsvjdntzaffboue.supabase.co/functions/v1/send_push_notification',
-        data: {
+      final response = await SupabaseService.instance.client.functions.invoke(
+        'send_push_notification',
+        body: {
           'user_id': userId,
           'type': type,
           'title': title,
           'body': body,
-          'data': data,
+          'data': {...data, 'type': type},
         },
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $anonKey',
-            'Content-Type': 'application/json',
-          },
-        ),
       );
+      final responseData = response.data;
+      final nativeSent = responseData is Map
+          ? ((responseData['sent'] as num?)?.toInt() ?? 0) > 0
+          : false;
       debugPrint('PUSH NOTIFICATION: sent type=$type to userId=$userId');
+      if (!nativeSent) {
+        debugPrint('PUSH NOTIFICATION: native send returned no recipients');
+      }
     } catch (e) {
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
     }
