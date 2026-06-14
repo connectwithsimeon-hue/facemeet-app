@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'android_diagnostics_service.dart';
 import '../routes/app_routes.dart';
 import '../main.dart' show mainShellKey;
 
@@ -82,6 +83,10 @@ class PushNotificationService {
         badge: true,
         sound: true,
       );
+      await AndroidDiagnosticsService.instance.setValue(
+        'fcm_permission_status',
+        settings.authorizationStatus.name,
+      );
       _log(
         'PUSH DEBUG: requestPermission() completed — authorizationStatus=${settings.authorizationStatus}',
       );
@@ -112,6 +117,10 @@ class PushNotificationService {
       _log('PUSH DEBUG: calling getToken()...');
       final token = await _messaging.getToken();
       final fcmExists = token != null;
+      await AndroidDiagnosticsService.instance.setValue(
+        'fcm_token_generated',
+        fcmExists ? 'yes' : 'no',
+      );
       _log(
         'PUSH DEBUG: FCM token exists: $fcmExists${fcmExists ? ", length: ${token.length}" : ""}',
       );
@@ -178,6 +187,10 @@ class PushNotificationService {
       _log(
         'PUSH DEBUG: Upserting token — userId exists: true, platform: $platform, token length: ${token.length}',
       );
+      await AndroidDiagnosticsService.instance.setValues({
+        'device_tokens_upsert_attempted': 'yes',
+        'latest_device_token_platform': platform,
+      });
 
       await Supabase.instance.client.from('device_tokens').upsert({
         'user_id': userId,
@@ -189,8 +202,15 @@ class PushNotificationService {
 
       _log('PUSH DEBUG: Token save to Supabase: SUCCESS');
       debugPrint('PUSH: FCM token saved for user $userId on $platform');
+      await AndroidDiagnosticsService.instance.verifyDeviceTokenReadback(
+        fcmToken: token,
+      );
     } catch (e) {
       debugPrint('PUSH: Failed to save FCM token — $e');
+      await AndroidDiagnosticsService.instance.setValues({
+        'device_tokens_upsert_attempted': 'yes',
+        'fcm_token_saved_in_supabase': 'error',
+      });
       _log('PUSH DEBUG: Token save to Supabase: FAILED — error: $e');
     }
   }
@@ -200,6 +220,18 @@ class PushNotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('PUSH: Foreground message received — ${message.messageId}');
       _log('PUSH: Foreground message received — ${message.messageId}');
+      AndroidDiagnosticsService.instance.recordPushPayload(
+        source: 'last_foreground_message_payload',
+        data: message.data,
+      );
+      if (message.data['type'] == 'spark_session' ||
+          message.data['type'] == 'new_match' ||
+          message.data['type'] == 'new_spark') {
+        AndroidDiagnosticsService.instance.recordPushPayload(
+          source: 'last_spark_notification_payload',
+          data: message.data,
+        );
+      }
 
       if (kIsWeb) return; // Web handles notifications natively via browser
 
@@ -229,11 +261,19 @@ class PushNotificationService {
     // App opened from terminated state
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
+      await AndroidDiagnosticsService.instance.recordPushPayload(
+        source: 'last_initial_message_payload',
+        data: initialMessage.data,
+      );
       _routeFromMessage(initialMessage);
     }
 
     // App opened from background state
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      AndroidDiagnosticsService.instance.recordPushPayload(
+        source: 'last_opened_app_payload',
+        data: message.data,
+      );
       _routeFromMessage(message);
     });
   }
@@ -259,6 +299,10 @@ class PushNotificationService {
         try {
           final decoded = jsonDecode(payload);
           if (decoded is Map<String, dynamic>) {
+            AndroidDiagnosticsService.instance.recordPushPayload(
+              source: 'last_notification_tap_payload',
+              data: decoded,
+            );
             _routeFromData(decoded);
           }
         } catch (e) {
@@ -281,24 +325,45 @@ class PushNotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     if (androidPlugin == null) {
+      await AndroidDiagnosticsService.instance.setValues({
+        'android_permission_api_available': 'no',
+        'android_permission_request_attempted': 'no',
+      });
       _log('PUSH DEBUG: Android notification permission plugin unavailable');
       return;
     }
 
     try {
       final enabledBefore = await androidPlugin.areNotificationsEnabled();
+      await AndroidDiagnosticsService.instance.setValues({
+        'android_permission_api_available': 'yes',
+        'android_notifications_enabled_before': enabledBefore,
+        'android_permission_request_attempted': 'yes',
+      });
       _log(
         'PUSH DEBUG: Android notifications enabled before prompt: $enabledBefore',
       );
       final granted = await androidPlugin.requestNotificationsPermission();
+      await AndroidDiagnosticsService.instance.setValue(
+        'android_permission_request_result',
+        granted,
+      );
       _log(
         'PUSH DEBUG: Android runtime notification permission granted: $granted',
       );
       final enabledAfter = await androidPlugin.areNotificationsEnabled();
+      await AndroidDiagnosticsService.instance.setValue(
+        'android_notifications_enabled_after',
+        enabledAfter,
+      );
       _log(
         'PUSH DEBUG: Android notifications enabled after prompt: $enabledAfter',
       );
     } catch (e) {
+      await AndroidDiagnosticsService.instance.setValues({
+        'android_permission_request_result': 'error',
+        'android_notifications_enabled_after': 'unknown',
+      });
       _log('PUSH DEBUG: Android notification permission request failed — $e');
     }
   }
@@ -306,6 +371,10 @@ class PushNotificationService {
   void _routeFromMessage(RemoteMessage message) {
     _log(
       'SPARK SESSION: notification tapped — fcm messageId=${message.messageId}',
+    );
+    AndroidDiagnosticsService.instance.recordPushPayload(
+      source: 'last_notification_tap_payload',
+      data: message.data,
     );
     _routeFromData(message.data);
   }

@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/supabase_service.dart';
+import '../../../services/android_diagnostics_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/user_safety_actions.dart';
 import './spark_video_webview_stub.dart'
@@ -363,10 +364,20 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
       if (mounted) {
         setState(() {});
       }
+      AndroidDiagnosticsService.instance.setValues({
+        'waiting_overlay_active': 'no',
+        'waiting_overlay_reason': 'remote participant detected',
+      });
     } else {
       debugPrint(
         'SPARK VIDEO CALL: _checkAndMarkFullyConnected — not yet fully connected. callStateJoined=$_callStateJoined, remoteParticipantPresent=$_remoteParticipantPresent',
       );
+      AndroidDiagnosticsService.instance.setValues({
+        'waiting_overlay_active': _callStateJoined ? 'yes' : 'no',
+        'waiting_overlay_reason': _callStateJoined
+            ? 'native Daily joined; waiting for remote participant'
+            : 'waiting for native Daily joined state',
+      });
     }
   }
 
@@ -770,200 +781,199 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
       child: Stack(
         fit: StackFit.expand,
         children: [
-            // Video layer — always present so DailyCallView starts connecting immediately
-            if (kIsWeb)
-              SparkVideoWebView(
-                // Bug 4: Use GlobalKey so we can call leaveCall() explicitly on timer expiry
-                key: _webViewKey,
-                roomUrl: widget.roomUrl,
-                meetingToken: widget.meetingToken,
-                // Fix 1: onConnected maps to _onCallStateJoined (not _onCallConnected)
-                onConnected: _onCallStateJoined,
-                onRemoteParticipantJoined: _onRemoteParticipantJoined,
-                onEndRequested: () => _endCall(enforceMinimumStay: false),
-                onMuteChanged: _onWebMuteChanged,
-                onCameraChanged: _onWebCameraChanged,
-                // Fix 3: errors shown as overlay, not closing the call
-                onError: _onDailyError,
-                showFaceMeetTimer: _callFullyConnected,
-                timerText: _timerDisplay,
-                timerIsUrgent: _secondsRemaining <= 60,
-              )
-            else
-              DailyCallView(
-                // Bug 2 fix: Use GlobalKey so we can call leave() explicitly before navigation
-                key: _nativeCallKey,
-                roomUrl: widget.roomUrl,
-                meetingToken: widget.meetingToken,
-                onCallEnded: _endCall,
-                // Fix 1: onCallConnected maps to _onCallStateJoined
-                onCallConnected: _onCallStateJoined,
-                // Fix 3: errors shown as overlay
-                onCallError: _onDailyError,
-                // Hide waiting overlay when remote participant joins
-                onRemoteParticipantJoined: _onRemoteParticipantJoined,
-              ),
-            // Connecting overlay — shown until call state is joined
-            if (!kIsWeb && _callConnecting) _buildConnectingOverlay(),
-            // Waiting for remote participant overlay
-            if (!kIsWeb &&
-                !_callConnecting &&
-                _callActive &&
-                !_callFullyConnected)
-              _buildWaitingForParticipantOverlay(),
-            // Dark gradient overlay (only when call is fully connected)
-            if (!kIsWeb && _callFullyConnected)
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xCC000000),
-                      Colors.transparent,
-                      Colors.transparent,
-                      Color(0xCC000000),
-                    ],
-                    stops: [0.0, 0.2, 0.7, 1.0],
-                  ),
+          // Video layer — always present so DailyCallView starts connecting immediately
+          if (kIsWeb)
+            SparkVideoWebView(
+              // Bug 4: Use GlobalKey so we can call leaveCall() explicitly on timer expiry
+              key: _webViewKey,
+              roomUrl: widget.roomUrl,
+              meetingToken: widget.meetingToken,
+              // Fix 1: onConnected maps to _onCallStateJoined (not _onCallConnected)
+              onConnected: _onCallStateJoined,
+              onRemoteParticipantJoined: _onRemoteParticipantJoined,
+              onEndRequested: () => _endCall(enforceMinimumStay: false),
+              onMuteChanged: _onWebMuteChanged,
+              onCameraChanged: _onWebCameraChanged,
+              // Fix 3: errors shown as overlay, not closing the call
+              onError: _onDailyError,
+              showFaceMeetTimer: _callFullyConnected,
+              timerText: _timerDisplay,
+              timerIsUrgent: _secondsRemaining <= 60,
+            )
+          else
+            DailyCallView(
+              // Bug 2 fix: Use GlobalKey so we can call leave() explicitly before navigation
+              key: _nativeCallKey,
+              roomUrl: widget.roomUrl,
+              meetingToken: widget.meetingToken,
+              onCallEnded: _endCall,
+              // Fix 1: onCallConnected maps to _onCallStateJoined
+              onCallConnected: _onCallStateJoined,
+              // Fix 3: errors shown as overlay
+              onCallError: _onDailyError,
+              // Hide waiting overlay when remote participant joins
+              onRemoteParticipantJoined: _onRemoteParticipantJoined,
+            ),
+          // Connecting overlay — shown until call state is joined
+          if (!kIsWeb && _callConnecting) _buildConnectingOverlay(),
+          // Waiting for remote participant overlay
+          if (!kIsWeb &&
+              !_callConnecting &&
+              _callActive &&
+              !_callFullyConnected)
+            _buildWaitingForParticipantOverlay(),
+          // Dark gradient overlay (only when call is fully connected)
+          if (!kIsWeb && _callFullyConnected)
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xCC000000),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Color(0xCC000000),
+                  ],
+                  stops: [0.0, 0.2, 0.7, 1.0],
                 ),
               ),
-            // Top bar with timer (only when call is fully connected)
-            if (!kIsWeb && _callFullyConnected)
-              SafeArea(
-                child: AnimatedOpacity(
-                  opacity: _showControls ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                    child: Row(
-                      children: [
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
+            ),
+          // Top bar with timer (only when call is fully connected)
+          if (!kIsWeb && _callFullyConnected)
+            SafeArea(
+              child: AnimatedOpacity(
+                opacity: _showControls ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: Row(
+                    children: [
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.otherUser['name'] as String? ?? 'Your Match',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if ((widget.otherUser['city'] as String? ?? '')
+                              .isNotEmpty)
                             Text(
-                              widget.otherUser['name'] as String? ??
-                                  'Your Match',
+                              widget.otherUser['city'] as String,
                               style: GoogleFonts.dmSans(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
                               ),
                             ),
-                            if ((widget.otherUser['city'] as String? ?? '')
-                                .isNotEmpty)
-                              Text(
-                                widget.otherUser['city'] as String,
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 12,
-                                  color: AppTheme.textSecondary,
+                        ],
+                      ),
+                      const Spacer(),
+                      // Countdown timer pill — only shown after call fully connects
+                      ScaleTransition(
+                        scale: _timerPulse,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _timerColor.withAlpha(51),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: _timerColor.withAlpha(128),
+                                  width: 1.5,
                                 ),
                               ),
-                          ],
-                        ),
-                        const Spacer(),
-                        // Countdown timer pill — only shown after call fully connects
-                        ScaleTransition(
-                          scale: _timerPulse,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(999),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _timerColor.withAlpha(51),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: _timerColor.withAlpha(128),
-                                    width: 1.5,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.timer_rounded,
+                                    color: _timerColor,
+                                    size: 14,
                                   ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.timer_rounded,
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _timerDisplay,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
                                       color: _timerColor,
-                                      size: 14,
+                                      fontFeatures: [
+                                        const FontFeature.tabularFigures(),
+                                      ],
                                     ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _timerDisplay,
-                                      style: GoogleFonts.dmSans(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        color: _timerColor,
-                                        fontFeatures: [
-                                          const FontFeature.tabularFigures(),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // Bottom controls (shown when call is active — joined or fully connected)
+          if (!kIsWeb && (_callActive || _callFullyConnected))
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                opacity: _showControls ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _ControlButton(
+                          icon: _isMuted
+                              ? Icons.mic_off_rounded
+                              : Icons.mic_rounded,
+                          label: _isMuted ? 'Unmute' : 'Mute',
+                          onTap: _toggleMute,
+                          isActive: _isMuted,
+                        ),
+                        _ControlButton(
+                          icon: Icons.call_end_rounded,
+                          label: 'End',
+                          onTap: _endCall,
+                          isDestructive: true,
+                          size: 64,
+                        ),
+                        _ControlButton(
+                          icon: _isCameraOff
+                              ? Icons.videocam_off_rounded
+                              : Icons.videocam_rounded,
+                          label: _isCameraOff ? 'Camera On' : 'Camera Off',
+                          onTap: _toggleCamera,
+                          isActive: _isCameraOff,
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-            // Bottom controls (shown when call is active — joined or fully connected)
-            if (!kIsWeb && (_callActive || _callFullyConnected))
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: AnimatedOpacity(
-                  opacity: _showControls ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _ControlButton(
-                            icon: _isMuted
-                                ? Icons.mic_off_rounded
-                                : Icons.mic_rounded,
-                            label: _isMuted ? 'Unmute' : 'Mute',
-                            onTap: _toggleMute,
-                            isActive: _isMuted,
-                          ),
-                          _ControlButton(
-                            icon: Icons.call_end_rounded,
-                            label: 'End',
-                            onTap: _endCall,
-                            isDestructive: true,
-                            size: 64,
-                          ),
-                          _ControlButton(
-                            icon: _isCameraOff
-                                ? Icons.videocam_off_rounded
-                                : Icons.videocam_rounded,
-                            label: _isCameraOff ? 'Camera On' : 'Camera Off',
-                            onTap: _toggleCamera,
-                            isActive: _isCameraOff,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (kIsWeb) _buildWebOverlayControls(),
-            _buildLiveSafetyMenu(),
-            // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
-            if (_showErrorOverlay) _buildErrorOverlay(),
-          ],
+            ),
+          if (kIsWeb) _buildWebOverlayControls(),
+          _buildLiveSafetyMenu(),
+          // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
+          if (_showErrorOverlay) _buildErrorOverlay(),
+        ],
       ),
     );
 

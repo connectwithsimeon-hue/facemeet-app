@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/subscription_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../services/android_diagnostics_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/web_push_notification_service.dart';
 import '../../theme/app_theme.dart';
@@ -111,7 +112,15 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       debugPrint(
         'PUSH NOTIFICATION: sent type=$type to userId=$userId, nativeSent=$nativePushSent',
       );
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_push_invoke_result',
+        'type=$type, sent=${nativePushSent ? 'yes' : 'no'}',
+      );
     } catch (e) {
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_push_invoke_result',
+        'type=$type, error',
+      );
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
     }
     if (!kIsWeb) return nativePushSent;

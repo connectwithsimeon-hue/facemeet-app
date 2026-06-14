@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import './presentation/main_shell_screen/main_shell_screen.dart';
 import './providers/subscription_provider.dart';
 import './services/presence_service.dart';
+import './services/android_diagnostics_service.dart';
 import './services/push_notification_service.dart';
 import './services/revenuecat_service.dart';
 import './services/supabase_service.dart';
@@ -45,6 +46,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // Already initialized — safe to ignore.
     debugPrint('FIREBASE BG: initializeApp skipped (already initialized): $e');
   }
+
+  await AndroidDiagnosticsService.instance.recordBackgroundMessage(
+    Map<String, dynamic>.from(message.data),
+  );
 
   final notification = message.notification;
   final title =

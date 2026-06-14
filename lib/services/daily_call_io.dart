@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'android_diagnostics_service.dart';
+
 // Native (iOS/Android) implementation using daily_flutter SDK
 // This file is imported on non-web platforms via conditional import
 
@@ -200,6 +202,10 @@ class DailyCallViewState extends State<DailyCallView> {
           _error = e.toString();
         });
         debugPrint('SPARK SESSION: Daily join final failure — $e');
+        AndroidDiagnosticsService.instance.setValue(
+          'native_daily_join_success',
+          'no',
+        );
         widget.onCallError?.call(e.toString());
       }
     }
@@ -230,6 +236,10 @@ class DailyCallViewState extends State<DailyCallView> {
 
       if (isJoined && !_connected) {
         _connected = true;
+        AndroidDiagnosticsService.instance.setValue(
+          'native_daily_join_success',
+          'yes',
+        );
         debugPrint('SPARK SESSION: Daily join success');
         debugPrint(
           'DAILY CALL VIEW: call state=joined — local video track should be active',
@@ -274,6 +284,10 @@ class DailyCallViewState extends State<DailyCallView> {
         'DAILY CALL VIEW: participant joined — id=${p.id}, isLocal=${p.info.isLocal}',
       );
       if (!p.info.isLocal) {
+        AndroidDiagnosticsService.instance.setValue(
+          'last_daily_participant_event',
+          'participant-joined',
+        );
         debugPrint(
           'DAILY CALL VIEW: REMOTE participant joined — firing onRemoteParticipantJoined callback',
         );
@@ -286,6 +300,10 @@ class DailyCallViewState extends State<DailyCallView> {
       final p = event.participant;
       if (!p.info.isLocal) {
         final hasVideo = p.media?.camera.track != null;
+        AndroidDiagnosticsService.instance.setValue(
+          'last_daily_participant_event',
+          'participant-updated',
+        );
         debugPrint(
           'DAILY CALL VIEW: remote participant updated — id=${p.id}, hasVideoTrack=$hasVideo',
         );
@@ -311,6 +329,10 @@ class DailyCallViewState extends State<DailyCallView> {
     debugPrint(
       'DAILY CALL VIEW: remote participant check ($source) — remoteCount=$remoteCount',
     );
+    final key = source.contains('delayed')
+        ? 'remote_participant_count_delayed'
+        : 'remote_participant_count_immediate';
+    AndroidDiagnosticsService.instance.setValue(key, remoteCount);
 
     if (remoteCount > 0) {
       widget.onRemoteParticipantJoined?.call();

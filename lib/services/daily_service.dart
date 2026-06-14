@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'android_diagnostics_service.dart';
 import 'supabase_service.dart';
 
 class DailyAccessResult {
@@ -83,6 +84,10 @@ class DailyService {
     if (safeSessionKey != null && safeSessionKey.isNotEmpty) {
       body['session_key'] = safeSessionKey;
     }
+    await AndroidDiagnosticsService.instance.setValues({
+      'current_spark_match_id': AndroidDiagnosticsService.shortId(safeMatchId),
+      'client_session_key': AndroidDiagnosticsService.shortId(safeSessionKey),
+    });
 
     try {
       debugPrint(
@@ -102,12 +107,26 @@ class DailyService {
       }
 
       final parsed = DailyAccessResult.fromMap(Map<String, dynamic>.from(data));
+      await AndroidDiagnosticsService.instance.setValues({
+        'daily_access_succeeded': 'yes',
+        'canonical_session_key': AndroidDiagnosticsService.shortId(
+          parsed.sessionKey,
+        ),
+        'daily_room_host_path': AndroidDiagnosticsService.roomHostPath(
+          parsed.roomUrl,
+        ),
+        'meeting_token_received': parsed.meetingToken.isNotEmpty ? 'yes' : 'no',
+      });
       debugPrint(
         'SPARK DAILY ACCESS: access granted for matchId=${parsed.matchId}, sessionId=${parsed.sessionId}, token_present=${parsed.meetingToken.isNotEmpty}',
       );
       return parsed;
     } catch (e) {
       final message = _safeErrorMessage(e);
+      await AndroidDiagnosticsService.instance.setValues({
+        'daily_access_succeeded': 'no',
+        'meeting_token_received': 'no',
+      });
       debugPrint('SPARK DAILY ACCESS: request failed — $message');
       throw Exception(message);
     }

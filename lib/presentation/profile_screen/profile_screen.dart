@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../routes/app_routes.dart';
+import '../../services/android_diagnostics_service.dart';
 import '../../services/content_filter_service.dart';
 import '../../services/presence_service.dart';
 import '../../services/realtime_notification_service.dart';
@@ -65,6 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadStats();
     _loadReferralData();
     _subscribeToMatchesRealtime();
+    AndroidDiagnosticsService.instance.load();
     if (kIsWeb) _loadNotificationState();
   }
 
@@ -944,6 +946,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 16),
         _buildCommunityGuidelinesCard(),
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
+          const SizedBox(height: 16),
+          _buildAndroidDiagnosticsCard(),
+        ],
         const SizedBox(height: 24),
         _SectionCard(
           title: 'Settings',
@@ -1020,7 +1026,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: AppTheme.textMuted,
                   ),
                 ),
-                onTap: () => Navigator.pushNamed(context, AppRoutes.eventsScreen),
+                onTap: () =>
+                    Navigator.pushNamed(context, AppRoutes.eventsScreen),
               ),
               Divider(color: AppTheme.borderGlass, height: 1),
               _SettingsRow(
@@ -1165,6 +1172,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAndroidDiagnosticsCard() {
+    return _SectionCard(
+      title: 'Android Diagnostics',
+      child: AnimatedBuilder(
+        animation: AndroidDiagnosticsService.instance,
+        builder: (context, _) {
+          return FutureBuilder<List<String>>(
+            future: AndroidDiagnosticsService.instance.buildProfileLines(),
+            builder: (context, snapshot) {
+              final lines =
+                  snapshot.data ?? const ['Loading Android diagnostics...'];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Internal test diagnostics. Safe to screenshot.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 360),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF101014),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.borderGlass),
+                    ),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        lines.join('\n'),
+                        style: GoogleFonts.robotoMono(
+                          fontSize: 11,
+                          height: 1.35,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await AndroidDiagnosticsService.instance
+                          .verifyDeviceTokenReadback();
+                    },
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: Text(
+                      'Refresh diagnostics',
+                      style: GoogleFonts.dmSans(fontWeight: FontWeight.w600),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }

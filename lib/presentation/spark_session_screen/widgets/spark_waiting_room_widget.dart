@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../routes/app_routes.dart';
+import '../../../services/android_diagnostics_service.dart';
 import '../../../services/daily_service.dart';
 import '../../../services/supabase_service.dart';
 import '../../../services/web_push_notification_service.dart';
@@ -127,6 +128,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       debugPrint(
         'SPARK WAITING ROOM: ✅ launching secure Spark Session — room_url exists=${access.roomUrl.isNotEmpty}, meeting_token exists=${access.meetingToken.isNotEmpty}',
       );
+      await AndroidDiagnosticsService.instance.setValues({
+        'waiting_overlay_active': 'no',
+        'waiting_overlay_reason': 'launching Daily call',
+      });
       _cancelTimers();
       if (mounted) {
         widget.onOtherUserJoined(
@@ -170,6 +175,13 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     setState(() {
       _isCreatingRoom = true;
       _errorMessage = null;
+    });
+    await AndroidDiagnosticsService.instance.setValues({
+      'current_spark_match_id': AndroidDiagnosticsService.shortId(
+        widget.matchId,
+      ),
+      'waiting_overlay_active': 'yes',
+      'waiting_overlay_reason': 'setting up spark session',
     });
 
     final matchId = widget.matchId;
@@ -303,6 +315,15 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       );
 
       _sessionKey = access.sessionKey;
+      await AndroidDiagnosticsService.instance.setValues({
+        'client_session_key': AndroidDiagnosticsService.shortId(
+          coordinationKey,
+        ),
+        'canonical_session_key': AndroidDiagnosticsService.shortId(
+          access.sessionKey,
+        ),
+        'waiting_overlay_reason': 'participant ready flag pending',
+      });
 
       debugPrint(
         'SPARK SESSION: secure access resolved — matchId=$matchId, sessionId=${access.sessionId}, sessionKey=$_sessionKey, room URL exists=${access.roomUrl.isNotEmpty}',
@@ -384,6 +405,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
                 _roomReady = true;
               });
             }
+            await AndroidDiagnosticsService.instance.setValue(
+              'waiting_overlay_reason',
+              'both ready; launching call',
+            );
             await _launchCall();
             return;
           }
@@ -399,6 +424,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           _isCreatingRoom = false;
           _roomReady = true;
         });
+        await AndroidDiagnosticsService.instance.setValue(
+          'waiting_overlay_reason',
+          'waiting for other participant ready flag',
+        );
 
         // ── STEP 4: Start 2-second polling timer ──
         _startReadyPolling();
@@ -415,6 +444,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         setState(() {
           _isCreatingRoom = false;
           _errorMessage = friendlyError;
+        });
+        await AndroidDiagnosticsService.instance.setValues({
+          'waiting_overlay_active': 'yes',
+          'waiting_overlay_reason': 'waiting room error',
         });
         if (_isOutOfSparksError(errMsg)) {
           _showOutOfSparksSheet();
@@ -921,7 +954,15 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       if (!nativeSent) {
         debugPrint('PUSH NOTIFICATION: native send returned no recipients');
       }
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_push_invoke_result',
+        'type=$type, sent=${nativeSent ? 'yes' : 'no'}',
+      );
     } catch (e) {
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_push_invoke_result',
+        'type=$type, error',
+      );
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
     }
     return await WebPushNotificationService.instance.sendWebPushNotification(
