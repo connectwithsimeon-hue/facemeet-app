@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/profile_avatar.dart';
 import '../../../widgets/user_safety_actions.dart';
+import '../../../services/android_diagnostics_service.dart';
 import '../../../services/content_filter_service.dart';
 import '../../../services/supabase_service.dart';
 import '../../../services/web_push_notification_service.dart';
@@ -131,7 +132,9 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
     _sparkRequestChannel = SupabaseService.instance.subscribeToNewSparkSessions(
       matchId: _matchId,
-      onNewSession: _handleIncomingSparkSessionRecord,
+      onNewSession: (record) {
+        unawaited(_handleIncomingSparkSessionRecord(record));
+      },
     );
   }
 
@@ -144,21 +147,23 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       final record = await SupabaseService.instance.client
           .from('spark_sessions')
           .select(
-            'id, initiated_by, status, ended_at, created_at, user_1_ready, user_2_ready',
+            'id, initiated_by, status, ended_at, created_at, user_1_ready, user_2_ready, session_key, decision_user_1, decision_user_2, outcome',
           )
           .eq('match_id', _matchId)
           .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
       if (record != null) {
-        _handleIncomingSparkSessionRecord(record);
+        await _handleIncomingSparkSessionRecord(record);
       }
     } catch (e) {
       debugPrint('CHAT THREAD: active spark-session check failed — $e');
     }
   }
 
-  void _handleIncomingSparkSessionRecord(Map<String, dynamic> record) {
+  Future<void> _handleIncomingSparkSessionRecord(
+    Map<String, dynamic> record,
+  ) async {
     final uid = SupabaseService.instance.currentUserId;
     if (uid == null || !mounted) return;
 
@@ -174,8 +179,50 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       return;
     }
     if (status == 'ended' || (endedAt != null && endedAt.isNotEmpty)) {
+      await _recordSuppressedSparkPopup(
+        reason: 'session_ended',
+        status: status,
+        endedAtExists: endedAt != null && endedAt.isNotEmpty,
+        chatUnlocked: false,
+        feedbackComplete: false,
+      );
       return;
     }
+
+    final outcome = record['outcome'];
+    final feedbackComplete =
+        record['decision_user_1'] != null && record['decision_user_2'] != null;
+    if (outcome != null || feedbackComplete) {
+      await _recordSuppressedSparkPopup(
+        reason: 'feedback_complete',
+        status: status,
+        endedAtExists: false,
+        chatUnlocked: false,
+        feedbackComplete: true,
+      );
+      return;
+    }
+
+    final eligibility = await SupabaseService.instance
+        .checkSparkSessionEntryEligibility(
+          matchId: _matchId,
+          sessionId: sessionId,
+        );
+    if (!eligibility.canEnter) {
+      await _recordSuppressedSparkPopup(
+        reason: eligibility.reason,
+        status: eligibility.sessionStatus ?? status,
+        endedAtExists: eligibility.endedAtExists,
+        chatUnlocked: eligibility.chatUnlocked,
+        feedbackComplete: eligibility.feedbackComplete,
+      );
+      debugPrint(
+        'CHAT THREAD: suppressed Spark Session popup — reason=${eligibility.reason}',
+      );
+      return;
+    }
+
+    if (!mounted) return;
     if (_lastIncomingSparkSessionId == sessionId && _showSparkRequestModal) {
       return;
     }
@@ -187,6 +234,22 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       _showSparkRequestModal = true;
       _incomingSessionId = sessionId;
       _lastIncomingSparkSessionId = sessionId;
+    });
+  }
+
+  Future<void> _recordSuppressedSparkPopup({
+    required String reason,
+    required String status,
+    required bool endedAtExists,
+    required bool chatUnlocked,
+    required bool feedbackComplete,
+  }) async {
+    await AndroidDiagnosticsService.instance.setValues({
+      'suppressed_session_popup_reason': reason,
+      'last_session_status': status.isEmpty ? 'unknown' : status,
+      'last_session_ended_at': endedAtExists ? 'yes' : 'no',
+      'last_session_chat_unlocked': chatUnlocked ? 'yes' : 'no',
+      'last_session_feedback_complete': feedbackComplete ? 'yes' : 'no',
     });
   }
 

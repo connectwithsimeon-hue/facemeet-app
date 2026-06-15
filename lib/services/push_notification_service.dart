@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'android_diagnostics_service.dart';
+import 'supabase_service.dart';
 import '../routes/app_routes.dart';
 import '../main.dart' show mainShellKey;
 
@@ -303,7 +305,7 @@ class PushNotificationService {
               source: 'last_notification_tap_payload',
               data: decoded,
             );
-            _routeFromData(decoded);
+            unawaited(_routeFromData(decoded));
           }
         } catch (e) {
           _log('PUSH: local notification payload decode failed — $e');
@@ -376,10 +378,10 @@ class PushNotificationService {
       source: 'last_notification_tap_payload',
       data: message.data,
     );
-    _routeFromData(message.data);
+    unawaited(_routeFromData(message.data));
   }
 
-  void _routeFromData(Map<String, dynamic> data) {
+  Future<void> _routeFromData(Map<String, dynamic> data) async {
     final type = data['type'] as String?;
     final navigator = pushNotificationNavigatorKey?.currentState;
 
@@ -455,6 +457,25 @@ class PushNotificationService {
           _log(
             'SPARK SESSION: invite notification received — matchId=$matchId',
           );
+          final eligibility = await SupabaseService.instance
+              .checkSparkSessionEntryEligibility(matchId: matchId);
+          if (!eligibility.canEnter) {
+            await AndroidDiagnosticsService.instance.setValues({
+              'suppressed_session_popup_reason': eligibility.reason,
+              'last_session_status': eligibility.sessionStatus ?? 'unknown',
+              'last_session_ended_at': eligibility.endedAtExists ? 'yes' : 'no',
+              'last_session_chat_unlocked': eligibility.chatUnlocked
+                  ? 'yes'
+                  : 'no',
+              'last_session_feedback_complete': eligibility.feedbackComplete
+                  ? 'yes'
+                  : 'no',
+            });
+            _log(
+              'SPARK SESSION: notification tap suppressed — reason=${eligibility.reason}',
+            );
+            return;
+          }
           // Always navigate directly to the spark session waiting room
           // with the correct matchId, regardless of where the notification
           // was triggered from (chat or elsewhere).

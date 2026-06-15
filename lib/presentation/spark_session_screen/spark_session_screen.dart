@@ -120,6 +120,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
                 .select('id, initiated_by')
                 .eq('match_id', _matchId!)
                 .not('status', 'eq', 'ended')
+                .isFilter('ended_at', null)
                 .gte('created_at', tenMinutesAgo)
                 .limit(1)
                 .maybeSingle();
@@ -212,8 +213,8 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         );
         if (mounted) {
           setState(() {
-            _otherUserProfile = SupabaseService.instance
-                .isUserFacingProfileAvailable(profile)
+            _otherUserProfile =
+                SupabaseService.instance.isUserFacingProfileAvailable(profile)
                 ? profile
                 : null;
             _loadingProfile = false;
@@ -724,6 +725,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
                   .from('spark_sessions')
                   .update({
                     'outcome': outcome,
+                    'status': 'ended',
                     'ended_at': DateTime.now().toIso8601String(),
                   })
                   .eq('id', sessionId);
@@ -731,7 +733,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
               // Update match status
               await SupabaseService.instance.client
                   .from('matches')
-                  .update({'status': matchStatus})
+                  .update({'status': matchStatus, 'current_session_key': null})
                   .eq('id', matchId);
 
               // If mutual spark, navigate directly to chat thread

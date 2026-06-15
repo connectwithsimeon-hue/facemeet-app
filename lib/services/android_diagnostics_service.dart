@@ -187,6 +187,11 @@ class AndroidDiagnosticsService extends ChangeNotifier {
       'waiting_overlay_active',
       'waiting_overlay_reason',
       'last_daily_participant_event',
+      'suppressed_session_popup_reason',
+      'last_session_status',
+      'last_session_ended_at',
+      'last_session_chat_unlocked',
+      'last_session_feedback_complete',
       'diagnostics_updated_at',
     ];
 

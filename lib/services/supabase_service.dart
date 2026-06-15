@@ -5,6 +5,24 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import 'content_filter_service.dart';
 
+class SparkSessionEntryEligibility {
+  final bool canEnter;
+  final String reason;
+  final String? sessionStatus;
+  final bool endedAtExists;
+  final bool chatUnlocked;
+  final bool feedbackComplete;
+
+  const SparkSessionEntryEligibility({
+    required this.canEnter,
+    required this.reason,
+    this.sessionStatus,
+    this.endedAtExists = false,
+    this.chatUnlocked = false,
+    this.feedbackComplete = false,
+  });
+}
+
 class SupabaseService {
   static SupabaseService? _instance;
   static SupabaseService get instance => _instance ??= SupabaseService._();
@@ -250,8 +268,7 @@ class SupabaseService {
   bool isUserFacingProfileAvailable(Map<String, dynamic>? profile) {
     if (profile == null) return false;
     final accountStatus =
-        profile['account_status']?.toString().trim().toLowerCase() ??
-        'active';
+        profile['account_status']?.toString().trim().toLowerCase() ?? 'active';
     final visibilityStatus =
         profile['profile_visibility_status']?.toString().trim().toLowerCase() ??
         'visible';
@@ -1293,11 +1310,15 @@ class SupabaseService {
           .from('spark_sessions')
           .update({
             'outcome': outcome,
+            'status': 'ended',
             'ended_at': DateTime.now().toIso8601String(),
           })
           .eq('id', sessionId);
 
-      await updateMatchStatus(matchId: matchId, status: matchStatus);
+      await client
+          .from('matches')
+          .update({'status': matchStatus, 'current_session_key': null})
+          .eq('id', matchId);
     }
   }
 
@@ -1311,6 +1332,143 @@ class SupabaseService {
         .limit(1)
         .maybeSingle();
     return response;
+  }
+
+  /// Read-only guard used before automatic Spark Session popups/navigation.
+  /// Manual starts still go through the normal Spark Session screen and secure
+  /// Daily access flow; this only suppresses stale completed attempts.
+  Future<SparkSessionEntryEligibility> checkSparkSessionEntryEligibility({
+    required String matchId,
+    String? sessionId,
+  }) async {
+    final cleanMatchId = matchId.trim();
+    if (cleanMatchId.isEmpty) {
+      return const SparkSessionEntryEligibility(
+        canEnter: false,
+        reason: 'invalid_match',
+      );
+    }
+
+    try {
+      final match = await client
+          .from('matches')
+          .select('status, current_session_key')
+          .eq('id', cleanMatchId)
+          .maybeSingle();
+
+      if (match == null) {
+        return const SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: 'match_not_found',
+        );
+      }
+
+      final matchStatus = (match['status'] as String? ?? '').toLowerCase();
+      final currentSessionKey = (match['current_session_key'] as String? ?? '')
+          .trim();
+
+      var query = client
+          .from('spark_sessions')
+          .select(
+            'id, status, ended_at, session_key, decision_user_1, decision_user_2, outcome, created_at',
+          )
+          .eq('match_id', cleanMatchId);
+
+      final cleanSessionId = sessionId?.trim();
+      if (cleanSessionId != null && cleanSessionId.isNotEmpty) {
+        query = query.eq('id', cleanSessionId);
+      } else if (currentSessionKey.isNotEmpty) {
+        query = query.eq('session_key', currentSessionKey);
+      }
+
+      final rows = await query.order('created_at', ascending: false).limit(1);
+      final session = rows.isNotEmpty
+          ? Map<String, dynamic>.from(rows.first as Map)
+          : null;
+
+      if (session == null) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: matchStatus == 'chat_unlocked'
+              ? 'chat_unlocked_no_active_session'
+              : 'no_active_session',
+          chatUnlocked: matchStatus == 'chat_unlocked',
+        );
+      }
+
+      final sessionStatus = (session['status'] as String? ?? '').toLowerCase();
+      final endedAt = session['ended_at'] as String?;
+      final endedAtExists = endedAt != null && endedAt.isNotEmpty;
+      final outcome = session['outcome'];
+      final d1 = session['decision_user_1'];
+      final d2 = session['decision_user_2'];
+      final feedbackComplete = d1 != null && d2 != null;
+      final sessionKey = (session['session_key'] as String? ?? '').trim();
+
+      if (sessionStatus == 'ended' || endedAtExists) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: 'session_ended',
+          sessionStatus: sessionStatus,
+          endedAtExists: endedAtExists,
+          chatUnlocked: matchStatus == 'chat_unlocked',
+          feedbackComplete: feedbackComplete,
+        );
+      }
+
+      if (outcome != null || feedbackComplete) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: 'feedback_complete',
+          sessionStatus: sessionStatus,
+          endedAtExists: endedAtExists,
+          chatUnlocked: matchStatus == 'chat_unlocked',
+          feedbackComplete: true,
+        );
+      }
+
+      if (currentSessionKey.isEmpty || sessionKey != currentSessionKey) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: 'stale_session_key',
+          sessionStatus: sessionStatus,
+          endedAtExists: endedAtExists,
+          chatUnlocked: matchStatus == 'chat_unlocked',
+          feedbackComplete: feedbackComplete,
+        );
+      }
+
+      final createdAt = DateTime.tryParse(
+        session['created_at'] as String? ?? '',
+      );
+      if (createdAt == null ||
+          DateTime.now().toUtc().difference(createdAt.toUtc()) >
+              const Duration(minutes: 12)) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: 'session_expired',
+          sessionStatus: sessionStatus,
+          endedAtExists: endedAtExists,
+          chatUnlocked: matchStatus == 'chat_unlocked',
+          feedbackComplete: feedbackComplete,
+        );
+      }
+
+      return SparkSessionEntryEligibility(
+        canEnter: true,
+        reason: 'active_session',
+        sessionStatus: sessionStatus,
+        endedAtExists: false,
+        chatUnlocked: matchStatus == 'chat_unlocked',
+        feedbackComplete: false,
+      );
+    } catch (e) {
+      debugPrint('SPARK ENTRY GUARD: eligibility check failed — $e');
+      return const SparkSessionEntryEligibility(
+        canEnter: false,
+        reason: 'eligibility_check_failed',
+      );
+    }
   }
 
   // ============================================================
