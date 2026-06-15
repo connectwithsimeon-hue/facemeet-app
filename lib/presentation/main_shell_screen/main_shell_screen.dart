@@ -432,6 +432,7 @@ class MainShellScreenState extends State<MainShellScreen> {
         'matchedUserId': matchedUserId,
         'sessionId': result.sessionId,
         'sessionKey': result.sessionKey,
+        'source': result.source,
       },
     );
   }

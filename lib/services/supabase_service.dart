@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import 'android_diagnostics_service.dart';
 import 'content_filter_service.dart';
 
 class SparkSessionEntryEligibility {
@@ -29,6 +30,7 @@ class CanonicalSparkSessionStartResult {
   final String matchId;
   final String? sessionId;
   final String? sessionKey;
+  final String? otherUserId;
   final String source;
 
   const CanonicalSparkSessionStartResult({
@@ -38,6 +40,7 @@ class CanonicalSparkSessionStartResult {
     required this.source,
     this.sessionId,
     this.sessionKey,
+    this.otherUserId,
   });
 }
 
@@ -1214,7 +1217,7 @@ class SupabaseService {
 
       final response = await client.functions.invoke(
         'spark_session_get_daily_access',
-        body: {'match_id': cleanMatchId},
+        body: {'match_id': cleanMatchId, 'source': cleanSource},
       );
       final data = response.data;
       if (data is Map && data['error'] != null) {
@@ -1242,6 +1245,11 @@ class SupabaseService {
           .trim();
       final sessionId = (data['session_id'] as String? ?? '').trim();
       final sessionKey = (data['session_key'] as String? ?? '').trim();
+      final otherUserId = (data['other_user_id'] as String? ?? '').trim();
+      final notificationTargetUserIsSelf =
+          data['notification_target_user_is_self']?.toString() ?? 'unknown';
+      final notificationStatus =
+          data['notification_status']?.toString() ?? 'unknown';
       final success =
           data['success'] == true &&
           data['active_joinable'] != false &&
@@ -1252,6 +1260,27 @@ class SupabaseService {
       debugPrint(
         'CANONICAL SPARK: result source=$cleanSource success=$success session present=${sessionId.isNotEmpty}',
       );
+      debugPrint(
+        'CANONICAL SPARK: notification status=$notificationStatus targetSelf=$notificationTargetUserIsSelf',
+      );
+      await AndroidDiagnosticsService.instance.setValues({
+        'canonical_source': cleanSource,
+        'canonical_session_id_short': AndroidDiagnosticsService.shortId(
+          sessionId,
+        ),
+        'canonical_session_key_short': AndroidDiagnosticsService.shortId(
+          sessionKey,
+        ),
+        'canonical_result': success ? 'joinable' : 'rejected',
+        'canonical_reject_reason': success
+            ? 'none'
+            : 'spark session unavailable',
+        'notification_target_user_is_self': notificationTargetUserIsSelf,
+        'manual_repeat_after_chat_unlocked':
+            matchStatus == 'chat_unlocked' && isManualNewSessionSource
+            ? 'yes'
+            : 'no',
+      });
 
       return CanonicalSparkSessionStartResult(
         canEnter: success,
@@ -1259,6 +1288,7 @@ class SupabaseService {
         matchId: canonicalMatchId.isNotEmpty ? canonicalMatchId : cleanMatchId,
         sessionId: sessionId.isEmpty ? null : sessionId,
         sessionKey: sessionKey.isEmpty ? null : sessionKey,
+        otherUserId: otherUserId.isEmpty ? null : otherUserId,
         source: cleanSource,
       );
     } catch (e) {
@@ -1510,6 +1540,18 @@ class SupabaseService {
       final matchStatus = (match['status'] as String? ?? '').toLowerCase();
       final currentSessionKey = (match['current_session_key'] as String? ?? '')
           .trim();
+      final cleanSessionId = sessionId?.trim();
+
+      if ((cleanSessionId == null || cleanSessionId.isEmpty) &&
+          currentSessionKey.isEmpty) {
+        return SparkSessionEntryEligibility(
+          canEnter: false,
+          reason: matchStatus == 'chat_unlocked'
+              ? 'chat_unlocked_no_active_session'
+              : 'no_active_session',
+          chatUnlocked: matchStatus == 'chat_unlocked',
+        );
+      }
 
       var query = client
           .from('spark_sessions')
@@ -1518,7 +1560,6 @@ class SupabaseService {
           )
           .eq('match_id', cleanMatchId);
 
-      final cleanSessionId = sessionId?.trim();
       if (cleanSessionId != null && cleanSessionId.isNotEmpty) {
         query = query.eq('id', cleanSessionId);
       } else if (currentSessionKey.isNotEmpty) {

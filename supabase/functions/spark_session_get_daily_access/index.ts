@@ -34,11 +34,21 @@ type SparkSessionRow = {
   initiated_by: string | null;
   session_key: string | null;
   ended_at: string | null;
+  outcome?: string | null;
+  decision_user_1?: string | null;
+  decision_user_2?: string | null;
 };
 
 type UserRow = {
   id: string;
   first_name: string | null;
+};
+
+type SessionAccessResult = {
+  session: SparkSessionRow;
+  roomUrl: string;
+  roomExpiresAt: string;
+  createdSession: boolean;
 };
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -78,10 +88,33 @@ function safeErrorMessage(error: unknown) {
     return "not authorized for this spark session";
   }
   if (text.includes("spark session expired")) return "spark session expired";
+  if (text.includes("chat_unlocked_no_active_session")) {
+    return "chat_unlocked_no_active_session";
+  }
   if (text.includes("spark session unavailable")) {
     return "spark session unavailable";
   }
   return "Daily video service is temporarily unavailable. Please try again later.";
+}
+
+function isExplicitManualStartSource(source: string) {
+  return new Set([
+    "chat_spark_button",
+    "sessions_tab_start",
+    "chat_manual_start",
+    "sessions_manual_start",
+  ]).has(source);
+}
+
+function shouldNotifyOtherParticipant(source: string) {
+  return new Set([
+    "chat_spark_button",
+    "sessions_tab_start",
+    "chat_manual_start",
+    "sessions_manual_start",
+    "discover_mutual_prompt",
+    "main_shell_mutual_match_popup",
+  ]).has(source);
 }
 
 function generateSessionKey() {
@@ -113,6 +146,9 @@ function getSessionExpiryIso(session: SparkSessionRow) {
 
 function isSessionExpired(session: SparkSessionRow) {
   if (session.status === "ended" || session.ended_at) return true;
+  if (session.outcome || (session.decision_user_1 && session.decision_user_2)) {
+    return true;
+  }
   const expiryMs = new Date(getSessionExpiryIso(session)).getTime();
   return Number.isFinite(expiryMs) ? expiryMs <= Date.now() : true;
 }
@@ -155,7 +191,7 @@ async function fetchSessionByKey(
   const { data, error } = await adminClient
     .from("spark_sessions")
     .select(
-      "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
+      "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at,outcome,decision_user_1,decision_user_2",
     )
     .eq("match_id", matchId)
     .eq("session_key", sessionKey)
@@ -315,7 +351,7 @@ async function ensureSessionAccess(params: {
   match: MatchRow;
   callerUserId: string;
   requestedSessionKey: string | null;
-}) {
+}): Promise<SessionAccessResult> {
   const preferredKey = params.match.current_session_key;
 
   if (preferredKey) {
@@ -349,6 +385,7 @@ async function ensureSessionAccess(params: {
         session,
         roomUrl: session.daily_room_url,
         roomExpiresAt: getSessionExpiryIso(session),
+        createdSession: false,
       };
     }
 
@@ -362,7 +399,7 @@ async function ensureSessionAccess(params: {
       .update({ daily_room_url: room.roomUrl })
       .eq("id", session.id)
       .select(
-        "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
+        "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at,outcome,decision_user_1,decision_user_2",
       )
       .single();
 
@@ -372,6 +409,7 @@ async function ensureSessionAccess(params: {
       session: data as SparkSessionRow,
       roomUrl: room.roomUrl,
       roomExpiresAt: room.roomExpiresAt,
+      createdSession: false,
     };
   }
 
@@ -398,6 +436,7 @@ async function ensureSessionAccess(params: {
       session: reusedSession,
       roomUrl: reusedSession.daily_room_url,
       roomExpiresAt: getSessionExpiryIso(reusedSession),
+      createdSession: false,
     };
   }
 
@@ -418,7 +457,7 @@ async function ensureSessionAccess(params: {
       status: "active",
     })
     .select(
-      "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
+      "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at,outcome,decision_user_1,decision_user_2",
     )
     .single();
 
@@ -435,7 +474,40 @@ async function ensureSessionAccess(params: {
     session: data as SparkSessionRow,
     roomUrl: room.roomUrl,
     roomExpiresAt: room.roomExpiresAt,
+    createdSession: true,
   };
+}
+
+async function notifyOtherParticipant(params: {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  otherUserId: string;
+  matchId: string;
+  source: string;
+}) {
+  try {
+    await fetch(`${params.supabaseUrl}/functions/v1/send_push_notification`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: params.otherUserId,
+        type: "spark_session",
+        title: "Your Spark Session is ready",
+        body: "Tap to join your 3-minute video date.",
+        data: {
+          match_id: params.matchId,
+          type: "spark_session",
+          source: params.source,
+        },
+      }),
+    });
+    return "attempted";
+  } catch {
+    return "failed";
+  }
 }
 
 serve(async (req) => {
@@ -481,6 +553,7 @@ serve(async (req) => {
     const matchId = normalizeString(body?.match_id);
     const requestedSessionKeyRaw = normalizeString(body?.session_key);
     const requestedSessionKey = requestedSessionKeyRaw || null;
+    const source = normalizeString(body?.source) || "unknown";
 
     if (!isUuid(matchId)) {
       throw new Error("invalid match");
@@ -496,7 +569,18 @@ serve(async (req) => {
       throw new Error("spark session unavailable");
     }
 
+    if (
+      match.status === "chat_unlocked" &&
+      !match.current_session_key &&
+      !isExplicitManualStartSource(source)
+    ) {
+      throw new Error("chat_unlocked_no_active_session");
+    }
+
     const callerUser = await fetchUser(adminClient, callerUserId);
+    const otherUserId = match.user_1_id === callerUserId
+      ? match.user_2_id
+      : match.user_1_id;
     const access = await ensureSessionAccess({
       adminClient,
       dailyApiKey,
@@ -517,12 +601,27 @@ serve(async (req) => {
       roomExpiresAtIso: access.roomExpiresAt,
     });
 
+    const notificationStatus =
+      access.createdSession && shouldNotifyOtherParticipant(source)
+        ? await notifyOtherParticipant({
+          supabaseUrl,
+          serviceRoleKey,
+          otherUserId,
+          matchId: match.id,
+          source,
+        })
+        : "not_sent";
+
     return jsonResponse({
       success: true,
       active_joinable: true,
       match_id: match.id,
       session_id: access.session.id,
       session_key: access.session.session_key,
+      other_user_id: otherUserId,
+      canonical_source: source,
+      notification_target_user_is_self: otherUserId === callerUserId ? "yes" : "no",
+      notification_status: notificationStatus,
       room_url: access.roomUrl,
       meeting_token: tokenResult.meetingToken,
       room_expires_at: access.roomExpiresAt,

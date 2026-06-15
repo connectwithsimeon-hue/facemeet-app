@@ -222,6 +222,7 @@ class SparksScreenState extends State<SparksScreen>
         'matchedUserId': otherId,
         'sessionId': result.sessionId,
         'sessionKey': result.sessionKey,
+        'source': result.source,
       },
     );
   }

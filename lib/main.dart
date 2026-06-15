@@ -244,6 +244,7 @@ class _SplashScreenState extends State<SplashScreen>
         'matchId': result.matchId,
         'sessionId': result.sessionId,
         'sessionKey': result.sessionKey,
+        'source': result.source,
       },
     );
     return true;

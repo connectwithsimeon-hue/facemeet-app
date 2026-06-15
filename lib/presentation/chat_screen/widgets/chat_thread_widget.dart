@@ -142,13 +142,27 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     if (uid == null) return;
 
     try {
+      final match = await SupabaseService.instance.client
+          .from('matches')
+          .select('current_session_key')
+          .eq('id', _matchId)
+          .maybeSingle();
+      final currentSessionKey = (match?['current_session_key'] as String? ?? '')
+          .trim();
+      if (currentSessionKey.isEmpty) {
+        await AndroidDiagnosticsService.instance.setValues({
+          'fallback_latest_row_used': 'no',
+          'suppressed_session_popup_reason': 'no_current_session_key',
+        });
+        return;
+      }
       final record = await SupabaseService.instance.client
           .from('spark_sessions')
           .select(
             'id, initiated_by, status, ended_at, created_at, user_1_ready, user_2_ready, session_key, decision_user_1, decision_user_2, outcome',
           )
           .eq('match_id', _matchId)
-          .order('created_at', ascending: false)
+          .eq('session_key', currentSessionKey)
           .limit(1)
           .maybeSingle();
       if (record != null) {
@@ -427,6 +441,7 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
         'matchedUserId': _otherUserId,
         'sessionId': result.sessionId,
         'sessionKey': result.sessionKey,
+        'source': result.source,
       },
     );
   }

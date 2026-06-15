@@ -577,6 +577,7 @@ class PushNotificationService {
       'matchId': result.matchId,
       'sessionId': result.sessionId,
       'sessionKey': result.sessionKey,
+      'source': result.source,
     };
     if (replaceStackWhenShellMissing) {
       _log(

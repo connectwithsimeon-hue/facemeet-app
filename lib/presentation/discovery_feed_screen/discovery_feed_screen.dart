@@ -295,17 +295,8 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
                 'MUTUAL SPARK PUSH: send to user B success/failure=$sentToMatched',
               );
 
-              final sentToCurrent = await WebPushNotificationService.instance
-                  .sendWebPushNotification(
-                    userId: currentUid,
-                    type: 'new_match',
-                    title: "It's a Mutual Spark ⚡",
-                    body:
-                        'You both Sparked. Open FaceMeet to start your 3-minute Spark Session.',
-                    data: {'match_id': matchId, 'type': 'new_match'},
-                  );
               debugPrint(
-                'MUTUAL SPARK PUSH: send to user A success/failure=$sentToCurrent',
+                'MUTUAL SPARK PUSH: skipped self notification for initiating user',
               );
             }
           } catch (e) {
@@ -436,6 +427,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         'matchedUserId': matchedUserId,
         'sessionId': result.sessionId,
         'sessionKey': result.sessionKey,
+        'source': result.source,
       },
     );
   }
