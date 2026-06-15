@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../main.dart' show mainShellKey;
 import '../../routes/app_routes.dart';
+import '../../services/android_diagnostics_service.dart';
 import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_avatar.dart';
@@ -177,7 +179,7 @@ class SparksScreenState extends State<SparksScreen>
     return enriched;
   }
 
-  void _startSparkSession(Map<String, dynamic> match) {
+  Future<void> _startSparkSession(Map<String, dynamic> match) async {
     final matchId = match['id'] as String;
     final uid = SupabaseService.instance.currentUserId;
     final otherId = match['user_1_id'] == uid
@@ -185,10 +187,42 @@ class SparksScreenState extends State<SparksScreen>
         : match['user_1_id'] as String;
 
     debugPrint('SPARK SESSION: join tapped from Sessions — matchId=$matchId');
+    const source = 'sessions_tab_start';
+    await AndroidDiagnosticsService.instance.setValue(
+      'entry_point_before_navigation',
+      source,
+    );
+    final result = await SupabaseService.instance
+        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
+    await AndroidDiagnosticsService.instance.setValues({
+      'canonical_resolver_source': source,
+      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
+      'canonical_resolver_reject_reason': result.canEnter
+          ? 'none'
+          : result.reason,
+      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
+        result.sessionKey,
+      ),
+    });
+    if (!mounted) return;
+    if (!result.canEnter) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not start Spark Session: ${result.reason}'),
+          backgroundColor: const Color(0xFFE8503A),
+        ),
+      );
+      return;
+    }
     Navigator.pushNamed(
       context,
       AppRoutes.sparkSessionScreen,
-      arguments: {'matchId': matchId, 'matchedUserId': otherId},
+      arguments: {
+        'matchId': result.matchId,
+        'matchedUserId': otherId,
+        'sessionId': result.sessionId,
+        'sessionKey': result.sessionKey,
+      },
     );
   }
 

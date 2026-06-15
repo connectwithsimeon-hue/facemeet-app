@@ -23,12 +23,16 @@ class SparkWaitingRoomWidget extends StatefulWidget {
   })
   onOtherUserJoined;
   final String? matchId;
+  final String? initialSessionKey;
+  final String? initialSessionId;
 
   const SparkWaitingRoomWidget({
     super.key,
     required this.otherUser,
     required this.onOtherUserJoined,
     this.matchId,
+    this.initialSessionKey,
+    this.initialSessionId,
   });
 
   @override
@@ -53,6 +57,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
   // The unique key for this specific session attempt
   String? _sessionKey;
+  String? _sessionId;
 
   // Simple 2-second polling timer — the only ready-detection mechanism
   Timer? _readyPollingTimer;
@@ -95,6 +100,8 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       ),
     );
 
+    _sessionKey = widget.initialSessionKey?.trim();
+    _sessionId = widget.initialSessionId?.trim();
     _createRoomAndWait();
   }
 
@@ -125,6 +132,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         sessionKey: _sessionKey,
       );
       _sessionKey = access.sessionKey;
+      _sessionId = access.sessionId;
       debugPrint(
         'SPARK WAITING ROOM: ✅ launching secure Spark Session — room_url exists=${access.roomUrl.isNotEmpty}, meeting_token exists=${access.meetingToken.isNotEmpty}',
       );
@@ -196,7 +204,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       bool isUser1 = false;
       String? user1Id;
       String? user2Id;
-      String? coordinationKey;
+      String? coordinationKey = _sessionKey;
 
       if (matchId == null || matchId.isEmpty) {
         if (mounted) {
@@ -218,7 +226,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         if (match != null) {
           user1Id = match['user_1_id'] as String?;
           user2Id = match['user_2_id'] as String?;
-          coordinationKey = match['current_session_key'] as String?;
+          coordinationKey ??= match['current_session_key'] as String?;
           isUser1 = user1Id == currentUid;
           debugPrint(
             'SPARK WAITING ROOM: STEP 1 — current user is ${isUser1 ? "user_1" : "user_2"} '
@@ -315,6 +323,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       );
 
       _sessionKey = access.sessionKey;
+      _sessionId = access.sessionId;
       await AndroidDiagnosticsService.instance.setValues({
         'client_session_key': AndroidDiagnosticsService.shortId(
           coordinationKey,
@@ -334,7 +343,8 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         await SupabaseService.instance.client
             .from('spark_sessions')
             .update({isUser1 ? 'user_1_ready' : 'user_2_ready': true})
-            .eq('id', access.sessionId);
+            .eq('id', access.sessionId)
+            .eq('session_key', access.sessionKey);
         debugPrint(
           'SPARK WAITING ROOM: ready flag updated for sessionId=${access.sessionId}',
         );
@@ -463,7 +473,14 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     try {
       // Query by session_key if available, otherwise fall back to match_id
       Map<String, dynamic>? session;
-      if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+      if (_sessionId != null && _sessionId!.isNotEmpty) {
+        session = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('daily_room_url, user_1_ready, user_2_ready')
+            .eq('id', _sessionId!)
+            .eq('match_id', matchId)
+            .maybeSingle();
+      } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
         session = await SupabaseService.instance.client
             .from('spark_sessions')
             .select('daily_room_url, user_1_ready, user_2_ready')
@@ -501,7 +518,29 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
   Future<void> _updateStartedAt(String matchId) async {
     try {
       // Update by session_key if available for precision
-      if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+      if (_sessionId != null && _sessionId!.isNotEmpty) {
+        final session = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('started_at, user_1_ready, user_2_ready')
+            .eq('id', _sessionId!)
+            .eq('match_id', matchId)
+            .maybeSingle();
+
+        if (session != null) {
+          final u1 = session['user_1_ready'] == true;
+          final u2 = session['user_2_ready'] == true;
+          if (u1 && u2) {
+            await SupabaseService.instance.client
+                .from('spark_sessions')
+                .update({'started_at': DateTime.now().toIso8601String()})
+                .eq('id', _sessionId!)
+                .eq('match_id', matchId);
+            debugPrint(
+              'SPARK WAITING ROOM: updated started_at for matchId=$matchId, sessionId=$_sessionId',
+            );
+          }
+        }
+      } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
         final session = await SupabaseService.instance.client
             .from('spark_sessions')
             .select('started_at, user_1_ready, user_2_ready')
@@ -571,7 +610,14 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       try {
         Map<String, dynamic>? session;
 
-        if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+        if (_sessionId != null && _sessionId!.isNotEmpty) {
+          session = await SupabaseService.instance.client
+              .from('spark_sessions')
+              .select('daily_room_url, user_1_ready, user_2_ready')
+              .eq('id', _sessionId!)
+              .eq('match_id', matchId)
+              .maybeSingle();
+        } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
           // Precise lookup: find the exact row for this attempt
           session = await SupabaseService.instance.client
               .from('spark_sessions')
@@ -655,7 +701,14 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         try {
           // Check if both users were ready before resetting
           Map<String, dynamic>? session;
-          if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+          if (_sessionId != null && _sessionId!.isNotEmpty) {
+            session = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('user_1_ready, user_2_ready, initiated_by')
+                .eq('id', _sessionId!)
+                .eq('match_id', matchId)
+                .maybeSingle();
+          } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
             session = await SupabaseService.instance.client
                 .from('spark_sessions')
                 .select('user_1_ready, user_2_ready, initiated_by')
@@ -675,7 +728,13 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           final bothJoined = u1Ready && u2Ready;
 
           // Reset ready flags on the specific session row
-          if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+          if (_sessionId != null && _sessionId!.isNotEmpty) {
+            await SupabaseService.instance.client
+                .from('spark_sessions')
+                .update({'user_1_ready': false, 'user_2_ready': false})
+                .eq('id', _sessionId!)
+                .eq('match_id', matchId);
+          } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
             await SupabaseService.instance.client
                 .from('spark_sessions')
                 .update({'user_1_ready': false, 'user_2_ready': false})

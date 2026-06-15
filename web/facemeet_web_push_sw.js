@@ -29,7 +29,10 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const data = event.notification.data || {};
-  const targetUrl = data.url || "/";
+  const targetUrl =
+    data.match_id && (data.type === "spark_session" || data.type === "new_match")
+      ? `/?push_type=${encodeURIComponent(data.type)}&spark_match_id=${encodeURIComponent(data.match_id)}`
+      : data.url || "/";
   const url = new URL(targetUrl, self.location.origin).href;
 
   event.waitUntil(

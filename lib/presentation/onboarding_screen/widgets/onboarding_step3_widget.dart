@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../theme/app_theme.dart';
+import '../../../services/android_diagnostics_service.dart';
 import '../../../services/metro_location_service.dart';
 
 class OnboardingLocationData {
@@ -137,18 +138,34 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
 
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      await AndroidDiagnosticsService.instance.setValue(
+        'location_permission_status',
+        serviceEnabled ? 'service_enabled' : 'service_disabled',
+      );
       if (!serviceEnabled) {
         _handleDenied();
         return;
       }
 
       var permission = await Geolocator.checkPermission();
+      await AndroidDiagnosticsService.instance.setValue(
+        'location_permission_status',
+        permission.name,
+      );
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+        await AndroidDiagnosticsService.instance.setValue(
+          'location_permission_request_result',
+          permission.name,
+        );
       }
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
+        await AndroidDiagnosticsService.instance.setValue(
+          'location_updated_yes_no',
+          'no',
+        );
         _handleDenied();
         return;
       }
@@ -184,7 +201,15 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
       });
 
       _emitLocation(source: 'detected', permissionGranted: true);
+      await AndroidDiagnosticsService.instance.setValues({
+        'location_permission_status': permission.name,
+        'location_updated_yes_no': 'yes',
+      });
     } catch (e) {
+      await AndroidDiagnosticsService.instance.setValue(
+        'location_updated_yes_no',
+        'no',
+      );
       _handleDenied();
     }
   }

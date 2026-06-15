@@ -381,13 +381,61 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
               'SPARK SESSION: join tapped from discovery mutual prompt — matchId=$matchId',
             );
             Navigator.of(dialogContext).pop();
-            Navigator.pushNamed(
-              context,
-              AppRoutes.sparkSessionScreen,
-              arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
+            unawaited(
+              _openCanonicalSparkSession(
+                matchId: matchId,
+                matchedUserId: matchedUserId,
+                source: 'discover_mutual_prompt',
+              ),
             );
           },
         );
+      },
+    );
+  }
+
+  Future<void> _openCanonicalSparkSession({
+    required String matchId,
+    required String matchedUserId,
+    required String source,
+  }) async {
+    await AndroidDiagnosticsService.instance.setValue(
+      'entry_point_before_navigation',
+      source,
+    );
+    final result = await SupabaseService.instance
+        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
+    await AndroidDiagnosticsService.instance.setValues({
+      'canonical_resolver_source': source,
+      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
+      'canonical_resolver_reject_reason': result.canEnter
+          ? 'none'
+          : result.reason,
+      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
+        result.sessionKey,
+      ),
+    });
+    if (!mounted) return;
+    if (!result.canEnter) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not start Spark Session: ${result.reason}',
+            style: GoogleFonts.dmSans(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFFE8503A),
+        ),
+      );
+      return;
+    }
+    Navigator.pushNamed(
+      context,
+      AppRoutes.sparkSessionScreen,
+      arguments: {
+        'matchId': result.matchId,
+        'matchedUserId': matchedUserId,
+        'sessionId': result.sessionId,
+        'sessionKey': result.sessionKey,
       },
     );
   }

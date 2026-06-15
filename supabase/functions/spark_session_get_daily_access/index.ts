@@ -519,6 +519,7 @@ serve(async (req) => {
 
     return jsonResponse({
       success: true,
+      active_joinable: true,
       match_id: match.id,
       session_id: access.session.id,
       session_key: access.session.session_key,

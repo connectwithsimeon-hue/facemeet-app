@@ -57,6 +57,8 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     if (args is Map<String, dynamic>) {
       _matchId = args['matchId'] as String?;
       _matchedUserId = args['matchedUserId'] as String?;
+      _sessionKey ??= args['sessionKey'] as String?;
+      _sparkSessionId ??= args['sessionId'] as String?;
     }
     if (_loadingProfile) {
       _checkFeatureGatingThenLoad();
@@ -959,6 +961,8 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         return SparkWaitingRoomWidget(
           otherUser: _safeOtherUser,
           matchId: _matchId,
+          initialSessionKey: _sessionKey,
+          initialSessionId: _sparkSessionId,
           onOtherUserJoined:
               ({
                 String? roomUrl,
