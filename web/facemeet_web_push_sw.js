@@ -40,6 +40,11 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clients) {
         if ("focus" in client) {
           client.postMessage({ type: "FACEMEET_WEB_PUSH_CLICK", data });
+          if ("navigate" in client) {
+            return client.navigate(url).then((navigatedClient) => {
+              return navigatedClient ? navigatedClient.focus() : client.focus();
+            });
+          }
           return client.focus();
         }
       }
