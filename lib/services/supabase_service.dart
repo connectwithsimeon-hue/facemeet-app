@@ -44,6 +44,38 @@ class CanonicalSparkSessionStartResult {
   });
 }
 
+class SparkSessionDecisionResult {
+  final bool success;
+  final bool waitingForOther;
+  final bool bothDecisionsReceived;
+  final bool chatUnlocked;
+  final String outcome;
+  final String matchStatus;
+  final String? error;
+
+  const SparkSessionDecisionResult({
+    required this.success,
+    required this.waitingForOther,
+    required this.bothDecisionsReceived,
+    required this.chatUnlocked,
+    required this.outcome,
+    required this.matchStatus,
+    this.error,
+  });
+
+  factory SparkSessionDecisionResult.fromJson(Map<String, dynamic> json) {
+    return SparkSessionDecisionResult(
+      success: json['success'] == true,
+      waitingForOther: json['waiting_for_other'] == true,
+      bothDecisionsReceived: json['both_decisions_received'] == true,
+      chatUnlocked: json['chat_unlocked'] == true,
+      outcome: (json['outcome'] as String? ?? '').trim(),
+      matchStatus: (json['match_status'] as String? ?? '').trim(),
+      error: json['error'] as String?,
+    );
+  }
+}
+
 class SupabaseService {
   static SupabaseService? _instance;
   static SupabaseService get instance => _instance ??= SupabaseService._();
@@ -1447,53 +1479,48 @@ class SupabaseService {
     required String matchId,
     required String decision, // 'spark' or 'skip'
   }) async {
-    final uid = currentUserId;
-    if (uid == null) return;
+    throw UnsupportedError(
+      'saveSparkDecision is deprecated. Use submitSparkSessionDecision with '
+      'the canonical session key so feedback is completed server-side.',
+    );
+  }
 
-    // Determine if current user is user_1 or user_2
-    final match = await getMatch(matchId);
-    if (match == null) return;
-
-    final isUser1 = match['user_1_id'] == uid;
-    final decisionField = isUser1 ? 'decision_user_1' : 'decision_user_2';
-
-    await client
-        .from('spark_sessions')
-        .update({decisionField: decision})
-        .eq('id', sessionId);
-
-    // Check if both decisions are in and determine outcome
-    final session = await client
-        .from('spark_sessions')
-        .select()
-        .eq('id', sessionId)
-        .single();
-
-    final d1 = session['decision_user_1'];
-    final d2 = session['decision_user_2'];
-
-    if (d1 != null && d2 != null) {
-      final outcome = (d1 == 'spark' && d2 == 'spark')
-          ? 'mutual_spark'
-          : 'no_spark';
-      final matchStatus = outcome == 'mutual_spark'
-          ? 'chat_unlocked'
-          : 'session_ended';
-
-      await client
-          .from('spark_sessions')
-          .update({
-            'outcome': outcome,
-            'status': 'ended',
-            'ended_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', sessionId);
-
-      await client
-          .from('matches')
-          .update({'status': matchStatus, 'current_session_key': null})
-          .eq('id', matchId);
+  Future<SparkSessionDecisionResult> submitSparkSessionDecision({
+    required String matchId,
+    required String sessionId,
+    required String sessionKey,
+    required bool didSpark,
+  }) async {
+    final cleanMatchId = matchId.trim();
+    final cleanSessionId = sessionId.trim();
+    final cleanSessionKey = sessionKey.trim();
+    if (cleanMatchId.isEmpty ||
+        cleanSessionId.isEmpty ||
+        cleanSessionKey.isEmpty) {
+      throw Exception('Missing active Spark Session details.');
     }
+
+    final response = await client.rpc(
+      'submit_spark_session_decision',
+      params: {
+        'p_match_id': cleanMatchId,
+        'p_session_id': cleanSessionId,
+        'p_session_key': cleanSessionKey,
+        'p_decision': didSpark ? 'spark' : 'skip',
+      },
+    );
+
+    if (response is! Map) {
+      throw Exception('Unexpected Spark Session decision response.');
+    }
+
+    final result = SparkSessionDecisionResult.fromJson(
+      Map<String, dynamic>.from(response),
+    );
+    if (!result.success) {
+      throw Exception(result.error ?? 'Spark Session decision was not saved.');
+    }
+    return result;
   }
 
   /// Get spark session for a match

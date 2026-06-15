@@ -514,18 +514,6 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
             'ended_at': DateTime.now().toIso8601String(),
           })
           .eq('id', sessionId);
-      final matchId = widget.matchId?.trim();
-      final sessionKey = widget.sessionKey?.trim();
-      if (matchId != null &&
-          matchId.isNotEmpty &&
-          sessionKey != null &&
-          sessionKey.isNotEmpty) {
-        await SupabaseService.instance.client
-            .from('matches')
-            .update({'current_session_key': null})
-            .eq('id', matchId)
-            .eq('current_session_key', sessionKey);
-      }
       debugPrint(
         'SPARK VIDEO CALL: session $sessionId marked as ended by $currentUserId',
       );
