@@ -203,6 +203,31 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       return;
     }
 
+    if (record['user_1_ready'] == true && record['user_2_ready'] == true) {
+      await _recordSuppressedSparkPopup(
+        reason: 'both_users_already_joined',
+        status: status,
+        endedAtExists: false,
+        chatUnlocked: false,
+        feedbackComplete: false,
+      );
+      return;
+    }
+
+    final currentUserAlreadyJoined = await _currentUserAlreadyJoinedSession(
+      record,
+    );
+    if (currentUserAlreadyJoined) {
+      await _recordSuppressedSparkPopup(
+        reason: 'current_user_already_joined',
+        status: status,
+        endedAtExists: false,
+        chatUnlocked: false,
+        feedbackComplete: false,
+      );
+      return;
+    }
+
     final eligibility = await SupabaseService.instance
         .checkSparkSessionEntryEligibility(
           matchId: _matchId,
@@ -235,6 +260,39 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       _incomingSessionId = sessionId;
       _lastIncomingSparkSessionId = sessionId;
     });
+  }
+
+  Future<bool> _currentUserAlreadyJoinedSession(
+    Map<String, dynamic> record,
+  ) async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null || _matchId.isEmpty) return false;
+
+    try {
+      final match = await SupabaseService.instance.client
+          .from('matches')
+          .select('user_1_id, user_2_id, status')
+          .eq('id', _matchId)
+          .maybeSingle();
+      if (match == null) return false;
+
+      final matchStatus = (match['status'] as String? ?? '').toLowerCase();
+      if (matchStatus == 'chat_unlocked' || matchStatus == 'session_ended') {
+        return true;
+      }
+
+      if (match['user_1_id'] == uid) {
+        return record['user_1_ready'] == true;
+      }
+      if (match['user_2_id'] == uid) {
+        return record['user_2_ready'] == true;
+      }
+    } catch (e) {
+      debugPrint(
+        'CHAT THREAD: current-user session readiness check failed — $e',
+      );
+    }
+    return false;
   }
 
   Future<void> _recordSuppressedSparkPopup({

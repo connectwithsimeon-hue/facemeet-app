@@ -965,6 +965,21 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       final edgeReason = responseData is Map
           ? (responseData['reason']?.toString() ?? 'unknown')
           : 'unknown';
+      final androidTargetTokenCount = responseData is Map
+          ? ((responseData['android_push_target_token_count'] as num?)
+                    ?.toInt() ??
+                androidTokenRows)
+          : 0;
+      final fcmAttempted = responseData is Map
+          ? responseData['fcm_send_attempted'] == true
+          : false;
+      final fcmSuccessCount = responseData is Map
+          ? ((responseData['fcm_success_count'] as num?)?.toInt() ??
+                nativeSentCount)
+          : 0;
+      final fcmFailureReason = responseData is Map
+          ? (responseData['fcm_failure_reason_safe']?.toString() ?? 'unknown')
+          : 'unknown';
       debugPrint('PUSH NOTIFICATION: sent type=$type to userId=$userId');
       if (!nativeSent) {
         debugPrint('PUSH NOTIFICATION: edge send returned no recipients');
@@ -978,6 +993,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         'last_push_native_sent': nativeSentCount,
         'last_push_web_sent': webSentCount,
         'last_push_edge_reason': edgeReason,
+        'android_push_target_token_count': androidTargetTokenCount,
+        'fcm_send_attempted': fcmAttempted ? 'yes' : 'no',
+        'fcm_success_count': fcmSuccessCount,
+        'fcm_failure_reason_safe': fcmFailureReason,
       });
       return nativeSent;
     } catch (e) {

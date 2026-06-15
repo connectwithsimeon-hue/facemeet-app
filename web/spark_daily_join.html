@@ -173,6 +173,11 @@
 
       #timer-pill {
         display: none;
+        position: fixed;
+        top: 50%;
+        right: max(14px, env(safe-area-inset-right));
+        transform: translateY(-50%);
+        z-index: 6;
         align-items: center;
         gap: 8px;
         padding: 11px 14px;
@@ -182,6 +187,7 @@
         border: 1px solid rgba(25, 210, 143, 0.45);
         backdrop-filter: blur(16px);
         box-shadow: var(--shadow);
+        pointer-events: none;
       }
 
       #timer-dot {

@@ -234,26 +234,41 @@ class PushNotificationService {
           data: message.data,
         );
       }
+      AndroidDiagnosticsService.instance.setValue(
+        'last_fcm_message_received',
+        'foreground:${message.data['type'] ?? 'unknown'}',
+      );
 
       if (kIsWeb) return; // Web handles notifications natively via browser
 
       final notification = message.notification;
-      if (notification == null) return;
+      final notificationTitle =
+          notification?.title ?? _fallbackNotificationTitle(message.data);
+      final notificationBody =
+          notification?.body ?? _fallbackNotificationBody(message.data);
+      if (notificationTitle.trim().isEmpty && notificationBody.trim().isEmpty) {
+        return;
+      }
 
       _localNotifications.show(
-        notification.hashCode,
-        notification.title,
-        notification.body,
+        (message.messageId ?? jsonEncode(message.data)).hashCode,
+        notificationTitle,
+        notificationBody,
         NotificationDetails(
           android: AndroidNotificationDetails(
             _channel.id,
             _channel.name,
             importance: Importance.max,
             priority: Priority.high,
+            channelShowBadge: true,
           ),
           iOS: const DarwinNotificationDetails(),
         ),
         payload: jsonEncode(message.data),
+      );
+      AndroidDiagnosticsService.instance.setValue(
+        'last_local_notification_shown',
+        'foreground:${message.data['type'] ?? 'unknown'}',
       );
     });
   }
@@ -267,6 +282,10 @@ class PushNotificationService {
         source: 'last_initial_message_payload',
         data: initialMessage.data,
       );
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_fcm_message_received',
+        'initial:${initialMessage.data['type'] ?? 'unknown'}',
+      );
       _routeFromMessage(initialMessage);
     }
 
@@ -275,6 +294,10 @@ class PushNotificationService {
       AndroidDiagnosticsService.instance.recordPushPayload(
         source: 'last_opened_app_payload',
         data: message.data,
+      );
+      AndroidDiagnosticsService.instance.setValue(
+        'last_fcm_message_received',
+        'opened:${message.data['type'] ?? 'unknown'}',
       );
       _routeFromMessage(message);
     });
@@ -319,6 +342,42 @@ class PushNotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     await androidPlugin?.createNotificationChannel(_channel);
+  }
+
+  String _fallbackNotificationTitle(Map<String, dynamic> data) {
+    final type = data['type']?.toString();
+    switch (type) {
+      case 'spark_session':
+        return 'Your Spark Session is ready';
+      case 'new_spark':
+        return 'Someone sparked you';
+      case 'new_match':
+        return 'It’s a match';
+      case 'chat_unlocked':
+        return 'Chat unlocked';
+      case 'new_message':
+        return 'New message';
+      default:
+        return 'FaceMeet';
+    }
+  }
+
+  String _fallbackNotificationBody(Map<String, dynamic> data) {
+    final type = data['type']?.toString();
+    switch (type) {
+      case 'spark_session':
+        return 'Tap to join your 3-minute video date.';
+      case 'new_spark':
+        return 'Open FaceMeet to respond.';
+      case 'new_match':
+        return 'Open FaceMeet to start your Spark Session.';
+      case 'chat_unlocked':
+        return 'You both felt the spark. Say hello.';
+      case 'new_message':
+        return 'Open FaceMeet to reply.';
+      default:
+        return '';
+    }
   }
 
   Future<void> _requestAndroidRuntimeNotificationPermission() async {

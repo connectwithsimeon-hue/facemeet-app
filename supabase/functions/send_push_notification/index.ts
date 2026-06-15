@@ -71,6 +71,9 @@ serve(async (req) => {
     let nativeSent = 0;
     let nativeFailureCount = 0;
     let nativeUnregisteredCount = 0;
+    let fcmFailureReasonSafe = nativeTokensFound > 0
+      ? "not_attempted"
+      : "no_native_tokens";
     let nativeReason = nativeTokensFound > 0
       ? "native_attempted"
       : "no_native_tokens";
@@ -81,6 +84,7 @@ serve(async (req) => {
 
     if (nativeTokensFound > 0 && !hasNativeConfig) {
       nativeReason = "native_push_not_configured";
+      fcmFailureReasonSafe = "native_push_not_configured";
     }
 
     if (nativeTokensFound > 0 && hasNativeConfig) {
@@ -88,6 +92,7 @@ serve(async (req) => {
       const projectId = Deno.env.get("FIREBASE_PROJECT_ID")!;
       const accessToken = await getFirebaseToken(serviceAccount);
       console.log("Native push access token acquired:", accessToken ? "yes" : "no");
+      fcmFailureReasonSafe = "none";
 
       for (const { fcm_token } of nativeTokens) {
         try {
@@ -140,6 +145,7 @@ serve(async (req) => {
             const errorCode = fcmData.error?.details?.[0]?.errorCode ||
               fcmData.error?.status ||
               "unknown";
+            fcmFailureReasonSafe = String(errorCode);
             console.log("Native push send failed:", { errorCode });
             if (errorCode === "UNREGISTERED") {
               nativeUnregisteredCount += 1;
@@ -147,6 +153,7 @@ serve(async (req) => {
           }
         } catch (error) {
           nativeFailureCount += 1;
+          fcmFailureReasonSafe = "send_exception";
           console.error(
             "Native push send error:",
             error instanceof Error ? error.message : "unknown",
@@ -155,6 +162,9 @@ serve(async (req) => {
       }
 
       nativeReason = nativeSent > 0 ? "native_sent" : "native_send_failed";
+      if (nativeSent > 0 && nativeFailureCount === 0) {
+        fcmFailureReasonSafe = "none";
+      }
     }
 
     const webResult = await sendWebPushToUser({
@@ -190,6 +200,10 @@ serve(async (req) => {
       JSON.stringify({
         sent,
         reason,
+        android_push_target_token_count: androidTokensFound,
+        fcm_send_attempted: nativeTokensFound > 0 && hasNativeConfig,
+        fcm_success_count: nativeSent,
+        fcm_failure_reason_safe: fcmFailureReasonSafe,
         native_tokens_found: nativeTokensFound,
         android_tokens_found: androidTokensFound,
         native_sent: nativeSent,
