@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -10,7 +9,6 @@ import '../../providers/subscription_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../services/android_diagnostics_service.dart';
 import '../../services/supabase_service.dart';
-import '../../services/web_push_notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_navigation.dart';
 import '../../widgets/loading_skeleton_widget.dart';
@@ -161,6 +159,35 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       final fcmFailureReason = responseData is Map
           ? (responseData['fcm_failure_reason_safe']?.toString() ?? 'unknown')
           : 'unknown';
+      final targetUserShort = responseData is Map
+          ? (responseData['target_user_short']?.toString() ??
+                AndroidDiagnosticsService.shortId(userId))
+          : AndroidDiagnosticsService.shortId(userId);
+      final senderUserShort = responseData is Map
+          ? (responseData['sender_user_short']?.toString() ??
+                AndroidDiagnosticsService.shortId(senderUserId))
+          : AndroidDiagnosticsService.shortId(senderUserId);
+      final targetEqualsSender = responseData is Map
+          ? responseData['target_equals_sender'] == true
+          : false;
+      final selfSuppressed = responseData is Map
+          ? responseData['self_notification_suppressed'] == true
+          : false;
+      final targetNativeTokenCount = responseData is Map
+          ? ((responseData['target_native_token_count'] as num?)?.toInt() ??
+                nativeTokenRows)
+          : nativeTokenRows;
+      final targetWebSubscriptionCount = responseData is Map
+          ? ((responseData['target_web_subscription_count'] as num?)?.toInt() ??
+                webSent)
+          : webSent;
+      final webPushAttempted = responseData is Map
+          ? responseData['web_push_attempted'] == true
+          : false;
+      final webPushSuccessCount = responseData is Map
+          ? ((responseData['web_push_success_count'] as num?)?.toInt() ??
+                webSent)
+          : webSent;
       debugPrint(
         'PUSH NOTIFICATION: sent type=$type to userId=$userId, nativeSent=$nativePushSent',
       );
@@ -177,6 +204,14 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         'fcm_send_attempted': fcmAttempted ? 'yes' : 'no',
         'fcm_success_count': fcmSuccessCount,
         'fcm_failure_reason_safe': fcmFailureReason,
+        'push_target_user_short': targetUserShort,
+        'push_sender_user_short': senderUserShort,
+        'push_target_equals_sender': targetEqualsSender ? 'yes' : 'no',
+        'push_self_notification_suppressed': selfSuppressed ? 'yes' : 'no',
+        'push_target_native_token_count': targetNativeTokenCount,
+        'push_target_web_subscription_count': targetWebSubscriptionCount,
+        'web_push_attempted': webPushAttempted ? 'yes' : 'no',
+        'web_push_success_count': webPushSuccessCount,
       });
     } catch (e) {
       await AndroidDiagnosticsService.instance.setValue(
@@ -185,14 +220,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       );
       debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
     }
-    if (!kIsWeb) return nativePushSent;
-    return await WebPushNotificationService.instance.sendWebPushNotification(
-      userId: userId,
-      type: type,
-      title: title,
-      body: body,
-      data: notificationData,
-    );
+    return nativePushSent;
   }
 
   /// Spark action: insert interaction, verify, check reciprocal, then advance.
