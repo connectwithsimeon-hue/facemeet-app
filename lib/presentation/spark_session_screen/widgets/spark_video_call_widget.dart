@@ -19,6 +19,8 @@ import '../../../services/daily_call_web.dart'
 
 // WebView — only on non-web platforms (conditional import for web safety)
 
+const bool kShowSparkDiagnosticsOverlay = false;
+
 enum _LiveSafetyAction { report, block, endAndReport, endAndBlock }
 
 class SparkVideoCallWidget extends StatefulWidget {
@@ -996,7 +998,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
             ),
           if (kIsWeb) _buildWebOverlayControls(),
           _buildLiveSafetyMenu(),
-          _buildSparkDiagnosticsPanel(),
+          if (kShowSparkDiagnosticsOverlay) _buildSparkDiagnosticsPanel(),
           // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
           if (_showErrorOverlay) _buildErrorOverlay(),
         ],
@@ -1038,10 +1040,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
                     child: Padding(
                       padding: const EdgeInsets.all(10),
                       child: Text(
-                        [
-                          'Spark Room Diagnostics',
-                          ...lines,
-                        ].join('\n'),
+                        ['Spark Room Diagnostics', ...lines].join('\n'),
                         maxLines: 30,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.robotoMono(

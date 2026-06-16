@@ -13,6 +13,8 @@ import '../../../theme/app_theme.dart';
 import '../../../widgets/profile_avatar.dart';
 import '../../../widgets/user_safety_actions.dart';
 
+const bool kShowSparkDiagnosticsOverlay = false;
+
 class SparkWaitingRoomWidget extends StatefulWidget {
   final Map<String, dynamic> otherUser;
   final void Function({
@@ -1671,7 +1673,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
             ),
           ),
           _buildWaitingRoomSafetyMenu(),
-          _buildSparkDiagnosticsPanel(),
+          if (kShowSparkDiagnosticsOverlay) _buildSparkDiagnosticsPanel(),
         ],
       ),
     );

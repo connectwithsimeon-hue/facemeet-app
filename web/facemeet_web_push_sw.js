@@ -9,9 +9,11 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "FaceMeet";
   const options = {
     body: payload.body || "",
-    icon: "/icons/Icon-192.png",
-    badge: "/icons/Icon-192.png",
+    icon: payload.icon || "/icons/Icon-maskable-192.png",
+    badge: payload.badge || "/icons/notification-badge.png",
+    image: payload.image || "/icons/Icon-512.png",
     data: payload.data || {},
+    vibrate: [80, 40, 80],
     tag: payload.tag || payload.data?.type || "facemeet",
   };
 

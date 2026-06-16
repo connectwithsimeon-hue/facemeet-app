@@ -40,7 +40,18 @@
       });
     });
 
-    return registration;
+    var readyRegistration = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise(function (_, reject) {
+        window.setTimeout(function () {
+          reject(new Error("service_worker_ready_timeout"));
+        }, 8000);
+      }),
+    ]).catch(function () {
+      return registration;
+    });
+
+    return readyRegistration || registration;
   }
 
   function isFaceMeetPushRegistration(registration) {
@@ -139,10 +150,17 @@
     }
 
     console.info("WEB PUSH: notification permission before request", Notification.permission);
+    var userActivation =
+      navigator.userActivation && navigator.userActivation.isActive
+        ? "active"
+        : "unknown";
     var permission = await Notification.requestPermission();
     console.info("WEB PUSH: notification permission after request", permission);
     if (permission !== "granted") {
-      return { permission: permission };
+      return {
+        permission: permission,
+        userActivation: userActivation,
+      };
     }
 
     try {
@@ -191,6 +209,7 @@
         userAgent: window.navigator.userAgent || "",
         platform: getPlatform(),
         permission: permission,
+        userActivation: userActivation,
         serviceWorkerReady: true,
         isFaceMeetWorker: true,
         subscriptionCreated: Boolean(json.endpoint && json.keys && json.keys.p256dh && json.keys.auth),
