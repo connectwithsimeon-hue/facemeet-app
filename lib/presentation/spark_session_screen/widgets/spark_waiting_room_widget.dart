@@ -8,6 +8,7 @@ import '../../../routes/app_routes.dart';
 import '../../../services/android_diagnostics_service.dart';
 import '../../../services/daily_service.dart';
 import '../../../services/supabase_service.dart';
+import '../../../services/web_push_notification_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/profile_avatar.dart';
 import '../../../widgets/user_safety_actions.dart';
@@ -22,16 +23,12 @@ class SparkWaitingRoomWidget extends StatefulWidget {
   })
   onOtherUserJoined;
   final String? matchId;
-  final String? initialSessionKey;
-  final String? initialSessionId;
 
   const SparkWaitingRoomWidget({
     super.key,
     required this.otherUser,
     required this.onOtherUserJoined,
     this.matchId,
-    this.initialSessionKey,
-    this.initialSessionId,
   });
 
   @override
@@ -56,7 +53,6 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
   // The unique key for this specific session attempt
   String? _sessionKey;
-  String? _sessionId;
 
   // Simple 2-second polling timer — the only ready-detection mechanism
   Timer? _readyPollingTimer;
@@ -99,8 +95,6 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       ),
     );
 
-    _sessionKey = widget.initialSessionKey?.trim();
-    _sessionId = widget.initialSessionId?.trim();
     _createRoomAndWait();
   }
 
@@ -131,7 +125,6 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         sessionKey: _sessionKey,
       );
       _sessionKey = access.sessionKey;
-      _sessionId = access.sessionId;
       debugPrint(
         'SPARK WAITING ROOM: ✅ launching secure Spark Session — room_url exists=${access.roomUrl.isNotEmpty}, meeting_token exists=${access.meetingToken.isNotEmpty}',
       );
@@ -203,7 +196,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       bool isUser1 = false;
       String? user1Id;
       String? user2Id;
-      String? coordinationKey = _sessionKey;
+      String? coordinationKey;
 
       if (matchId == null || matchId.isEmpty) {
         if (mounted) {
@@ -225,7 +218,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         if (match != null) {
           user1Id = match['user_1_id'] as String?;
           user2Id = match['user_2_id'] as String?;
-          coordinationKey ??= match['current_session_key'] as String?;
+          coordinationKey = match['current_session_key'] as String?;
           isUser1 = user1Id == currentUid;
           debugPrint(
             'SPARK WAITING ROOM: STEP 1 — current user is ${isUser1 ? "user_1" : "user_2"} '
@@ -322,7 +315,6 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       );
 
       _sessionKey = access.sessionKey;
-      _sessionId = access.sessionId;
       await AndroidDiagnosticsService.instance.setValues({
         'client_session_key': AndroidDiagnosticsService.shortId(
           coordinationKey,
@@ -339,15 +331,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
       // ── STEP 4: Mark this participant ready on the shared spark_session row ──
       try {
-        await AndroidDiagnosticsService.instance.setValues({
-          'ready_update_target': 'canonical_session_id',
-          'fallback_latest_row_used': 'no',
-        });
         await SupabaseService.instance.client
             .from('spark_sessions')
             .update({isUser1 ? 'user_1_ready' : 'user_2_ready': true})
-            .eq('id', access.sessionId)
-            .eq('session_key', access.sessionKey);
+            .eq('id', access.sessionId);
         debugPrint(
           'SPARK WAITING ROOM: ready flag updated for sessionId=${access.sessionId}',
         );
@@ -365,7 +352,40 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         return;
       }
 
-      // ── STEP 5: Fast path if both users are already ready ──
+      // ── STEP 5: Preserve existing push nudge behavior only for the true initiator ──
+      try {
+        final sessionMeta = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('initiated_by')
+            .eq('id', access.sessionId)
+            .maybeSingle();
+        final initiatedBy = sessionMeta?['initiated_by'] as String?;
+        if (initiatedBy != null && initiatedBy == currentUid) {
+          final otherUserId = isUser1 ? user2Id : user1Id;
+          if (otherUserId != null && otherUserId.isNotEmpty) {
+            await _sendPushNotification(
+              userId: otherUserId,
+              type: 'spark_session',
+              title: 'Your Spark Session is ready',
+              body: 'Tap to join your 3-minute video date.',
+              data: {'match_id': matchId, 'type': 'spark_session'},
+            );
+          }
+          if (currentUid != null && currentUid.isNotEmpty) {
+            await WebPushNotificationService.instance.sendWebPushNotification(
+              userId: currentUid,
+              type: 'spark_session',
+              title: 'Your Spark Session is ready',
+              body: 'Tap to join your 3-minute video date.',
+              data: {'match_id': matchId, 'type': 'spark_session'},
+            );
+          }
+        }
+      } catch (e) {
+        debugPrint('SESSION PUSH: success/failure=false — $e');
+      }
+
+      // ── STEP 6: Fast path if both users are already ready ──
       try {
         final freshSession = await SupabaseService.instance.client
             .from('spark_sessions')
@@ -441,16 +461,9 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     final matchId = widget.matchId;
     if (matchId == null || matchId.isEmpty) return;
     try {
-      // Query only the canonical session returned by the server.
+      // Query by session_key if available, otherwise fall back to match_id
       Map<String, dynamic>? session;
-      if (_sessionId != null && _sessionId!.isNotEmpty) {
-        session = await SupabaseService.instance.client
-            .from('spark_sessions')
-            .select('daily_room_url, user_1_ready, user_2_ready')
-            .eq('id', _sessionId!)
-            .eq('match_id', matchId)
-            .maybeSingle();
-      } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+      if (_sessionKey != null && _sessionKey!.isNotEmpty) {
         session = await SupabaseService.instance.client
             .from('spark_sessions')
             .select('daily_room_url, user_1_ready, user_2_ready')
@@ -458,14 +471,12 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
             .eq('session_key', _sessionKey!)
             .maybeSingle();
       } else {
-        await AndroidDiagnosticsService.instance.setValues({
-          'fallback_latest_row_used': 'no',
-          'ready_update_target': 'missing_canonical_session',
-        });
-        debugPrint(
-          'SPARK WAITING ROOM: immediate ready check skipped — missing canonical session id/key',
-        );
-        return;
+        session = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('daily_room_url, user_1_ready, user_2_ready')
+            .eq('match_id', matchId)
+            .limit(1)
+            .maybeSingle();
       }
 
       if (session != null) {
@@ -490,29 +501,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
   Future<void> _updateStartedAt(String matchId) async {
     try {
       // Update by session_key if available for precision
-      if (_sessionId != null && _sessionId!.isNotEmpty) {
-        final session = await SupabaseService.instance.client
-            .from('spark_sessions')
-            .select('started_at, user_1_ready, user_2_ready')
-            .eq('id', _sessionId!)
-            .eq('match_id', matchId)
-            .maybeSingle();
-
-        if (session != null) {
-          final u1 = session['user_1_ready'] == true;
-          final u2 = session['user_2_ready'] == true;
-          if (u1 && u2) {
-            await SupabaseService.instance.client
-                .from('spark_sessions')
-                .update({'started_at': DateTime.now().toIso8601String()})
-                .eq('id', _sessionId!)
-                .eq('match_id', matchId);
-            debugPrint(
-              'SPARK WAITING ROOM: updated started_at for matchId=$matchId, sessionId=$_sessionId',
-            );
-          }
-        }
-      } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+      if (_sessionKey != null && _sessionKey!.isNotEmpty) {
         final session = await SupabaseService.instance.client
             .from('spark_sessions')
             .select('started_at, user_1_ready, user_2_ready')
@@ -535,13 +524,26 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           }
         }
       } else {
-        await AndroidDiagnosticsService.instance.setValues({
-          'fallback_latest_row_used': 'no',
-          'ready_update_target': 'missing_canonical_session',
-        });
-        debugPrint(
-          'SPARK WAITING ROOM: started_at update skipped — missing canonical session id/key',
-        );
+        final session = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('started_at, user_1_ready, user_2_ready')
+            .eq('match_id', matchId)
+            .limit(1)
+            .maybeSingle();
+
+        if (session != null) {
+          final u1 = session['user_1_ready'] == true;
+          final u2 = session['user_2_ready'] == true;
+          if (u1 && u2) {
+            await SupabaseService.instance.client
+                .from('spark_sessions')
+                .update({'started_at': DateTime.now().toIso8601String()})
+                .eq('match_id', matchId);
+            debugPrint(
+              'SPARK WAITING ROOM: updated started_at for matchId=$matchId',
+            );
+          }
+        }
       }
     } catch (e) {
       debugPrint('SPARK WAITING ROOM: could not update started_at — $e');
@@ -569,14 +571,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       try {
         Map<String, dynamic>? session;
 
-        if (_sessionId != null && _sessionId!.isNotEmpty) {
-          session = await SupabaseService.instance.client
-              .from('spark_sessions')
-              .select('daily_room_url, user_1_ready, user_2_ready')
-              .eq('id', _sessionId!)
-              .eq('match_id', matchId)
-              .maybeSingle();
-        } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+        if (_sessionKey != null && _sessionKey!.isNotEmpty) {
           // Precise lookup: find the exact row for this attempt
           session = await SupabaseService.instance.client
               .from('spark_sessions')
@@ -585,14 +580,26 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
               .eq('session_key', _sessionKey!)
               .maybeSingle();
         } else {
-          await AndroidDiagnosticsService.instance.setValues({
-            'fallback_latest_row_used': 'no',
-            'ready_update_target': 'missing_canonical_session',
-          });
-          debugPrint(
-            'SPARK POLLING [$now]: missing canonical session id/key — not falling back to latest row',
-          );
-          return;
+          // Fallback: no key yet (shouldn't happen, but be safe)
+          session = await SupabaseService.instance.client
+              .from('spark_sessions')
+              .select('daily_room_url, user_1_ready, user_2_ready, session_key')
+              .eq('match_id', matchId)
+              .not('status', 'eq', 'ended')
+              .order('created_at', ascending: false)
+              .limit(1)
+              .maybeSingle();
+
+          // Capture the key if we found it
+          if (session != null && _sessionKey == null) {
+            final foundKey = session['session_key'] as String?;
+            if (foundKey != null && foundKey.isNotEmpty) {
+              _sessionKey = foundKey;
+              debugPrint(
+                'SPARK POLLING [$now]: captured session_key=$_sessionKey from fallback query',
+              );
+            }
+          }
         }
 
         if (session == null) {
@@ -648,14 +655,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         try {
           // Check if both users were ready before resetting
           Map<String, dynamic>? session;
-          if (_sessionId != null && _sessionId!.isNotEmpty) {
-            session = await SupabaseService.instance.client
-                .from('spark_sessions')
-                .select('user_1_ready, user_2_ready, initiated_by')
-                .eq('id', _sessionId!)
-                .eq('match_id', matchId)
-                .maybeSingle();
-          } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+          if (_sessionKey != null && _sessionKey!.isNotEmpty) {
             session = await SupabaseService.instance.client
                 .from('spark_sessions')
                 .select('user_1_ready, user_2_ready, initiated_by')
@@ -663,14 +663,11 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
                 .eq('session_key', _sessionKey!)
                 .maybeSingle();
           } else {
-            await AndroidDiagnosticsService.instance.setValues({
-              'fallback_latest_row_used': 'no',
-              'ready_update_target': 'missing_canonical_session',
-            });
-            debugPrint(
-              'SPARK TIMEOUT: cleanup skipped — missing canonical session id/key',
-            );
-            return;
+            session = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('user_1_ready, user_2_ready, initiated_by')
+                .eq('match_id', matchId)
+                .maybeSingle();
           }
 
           final u1Ready = session?['user_1_ready'] == true;
@@ -678,27 +675,17 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           final bothJoined = u1Ready && u2Ready;
 
           // Reset ready flags on the specific session row
-          if (_sessionId != null && _sessionId!.isNotEmpty) {
-            await SupabaseService.instance.client
-                .from('spark_sessions')
-                .update({'user_1_ready': false, 'user_2_ready': false})
-                .eq('id', _sessionId!)
-                .eq('match_id', matchId);
-          } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+          if (_sessionKey != null && _sessionKey!.isNotEmpty) {
             await SupabaseService.instance.client
                 .from('spark_sessions')
                 .update({'user_1_ready': false, 'user_2_ready': false})
                 .eq('match_id', matchId)
                 .eq('session_key', _sessionKey!);
           } else {
-            await AndroidDiagnosticsService.instance.setValues({
-              'fallback_latest_row_used': 'no',
-              'ready_update_target': 'missing_canonical_session',
-            });
-            debugPrint(
-              'SPARK TIMEOUT: ready reset skipped — missing canonical session id/key',
-            );
-            return;
+            await SupabaseService.instance.client
+                .from('spark_sessions')
+                .update({'user_1_ready': false, 'user_2_ready': false})
+                .eq('match_id', matchId);
           }
 
           // CRITICAL FIX: Clear current_session_key so next session starts fresh
@@ -937,6 +924,89 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     _pulseCtrl.dispose();
     _dotCtrl.dispose();
     super.dispose();
+  }
+
+  /// Send a push notification via the Supabase Edge Function.
+  /// Wrapped in try/catch so a failure never crashes the app.
+  Future<bool> _sendPushNotification({
+    required String userId,
+    required String type,
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) async {
+    try {
+      final response = await SupabaseService.instance.client.functions.invoke(
+        'send_push_notification',
+        body: {
+          'user_id': userId,
+          'type': type,
+          'title': title,
+          'body': body,
+          'data': {...data, 'type': type},
+        },
+      );
+      final responseData = response.data;
+      final nativeSent = responseData is Map
+          ? ((responseData['sent'] as num?)?.toInt() ?? 0) > 0
+          : false;
+      final nativeTokenRows = responseData is Map
+          ? ((responseData['native_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final androidTokenRows = responseData is Map
+          ? ((responseData['android_tokens_found'] as num?)?.toInt() ?? 0)
+          : 0;
+      final nativeSentCount = responseData is Map
+          ? ((responseData['native_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final webSentCount = responseData is Map
+          ? ((responseData['web_sent'] as num?)?.toInt() ?? 0)
+          : 0;
+      final edgeReason = responseData is Map
+          ? (responseData['reason']?.toString() ?? 'unknown')
+          : 'unknown';
+      final androidTargetTokenCount = responseData is Map
+          ? ((responseData['android_push_target_token_count'] as num?)
+                    ?.toInt() ??
+                androidTokenRows)
+          : 0;
+      final fcmAttempted = responseData is Map
+          ? responseData['fcm_send_attempted'] == true
+          : false;
+      final fcmSuccessCount = responseData is Map
+          ? ((responseData['fcm_success_count'] as num?)?.toInt() ??
+                nativeSentCount)
+          : 0;
+      final fcmFailureReason = responseData is Map
+          ? (responseData['fcm_failure_reason_safe']?.toString() ?? 'unknown')
+          : 'unknown';
+      debugPrint('PUSH NOTIFICATION: sent type=$type to userId=$userId');
+      if (!nativeSent) {
+        debugPrint('PUSH NOTIFICATION: edge send returned no recipients');
+      }
+      await AndroidDiagnosticsService.instance.setValues({
+        'last_push_invoke_result':
+            'type=$type, sent=${nativeSent ? 'yes' : 'no'}',
+        'last_push_recipient_id': AndroidDiagnosticsService.shortId(userId),
+        'last_push_token_rows_found': nativeTokenRows,
+        'last_push_android_token_rows_found': androidTokenRows,
+        'last_push_native_sent': nativeSentCount,
+        'last_push_web_sent': webSentCount,
+        'last_push_edge_reason': edgeReason,
+        'android_push_target_token_count': androidTargetTokenCount,
+        'fcm_send_attempted': fcmAttempted ? 'yes' : 'no',
+        'fcm_success_count': fcmSuccessCount,
+        'fcm_failure_reason_safe': fcmFailureReason,
+      });
+      return nativeSent;
+    } catch (e) {
+      await AndroidDiagnosticsService.instance.setValue(
+        'last_push_invoke_result',
+        'type=$type, error',
+      );
+      debugPrint('PUSH NOTIFICATION: failed to send type=$type — $e');
+      return false;
+    }
   }
 
   String get _otherFirstName {

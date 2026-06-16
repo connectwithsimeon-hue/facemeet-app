@@ -295,8 +295,17 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
                 'MUTUAL SPARK PUSH: send to user B success/failure=$sentToMatched',
               );
 
+              final sentToCurrent = await WebPushNotificationService.instance
+                  .sendWebPushNotification(
+                    userId: currentUid,
+                    type: 'new_match',
+                    title: "It's a Mutual Spark ⚡",
+                    body:
+                        'You both Sparked. Open FaceMeet to start your 3-minute Spark Session.',
+                    data: {'match_id': matchId, 'type': 'new_match'},
+                  );
               debugPrint(
-                'MUTUAL SPARK PUSH: skipped self notification for initiating user',
+                'MUTUAL SPARK PUSH: send to user A success/failure=$sentToCurrent',
               );
             }
           } catch (e) {
@@ -372,62 +381,13 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
               'SPARK SESSION: join tapped from discovery mutual prompt — matchId=$matchId',
             );
             Navigator.of(dialogContext).pop();
-            unawaited(
-              _openCanonicalSparkSession(
-                matchId: matchId,
-                matchedUserId: matchedUserId,
-                source: 'discover_mutual_prompt',
-              ),
+            Navigator.pushNamed(
+              context,
+              AppRoutes.sparkSessionScreen,
+              arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
             );
           },
         );
-      },
-    );
-  }
-
-  Future<void> _openCanonicalSparkSession({
-    required String matchId,
-    required String matchedUserId,
-    required String source,
-  }) async {
-    await AndroidDiagnosticsService.instance.setValue(
-      'entry_point_before_navigation',
-      source,
-    );
-    final result = await SupabaseService.instance
-        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
-    await AndroidDiagnosticsService.instance.setValues({
-      'canonical_resolver_source': source,
-      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
-      'canonical_resolver_reject_reason': result.canEnter
-          ? 'none'
-          : result.reason,
-      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
-        result.sessionKey,
-      ),
-    });
-    if (!mounted) return;
-    if (!result.canEnter) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not start Spark Session: ${result.reason}',
-            style: GoogleFonts.dmSans(fontSize: 13),
-          ),
-          backgroundColor: const Color(0xFFE8503A),
-        ),
-      );
-      return;
-    }
-    Navigator.pushNamed(
-      context,
-      AppRoutes.sparkSessionScreen,
-      arguments: {
-        'matchId': result.matchId,
-        'matchedUserId': matchedUserId,
-        'sessionId': result.sessionId,
-        'sessionKey': result.sessionKey,
-        'source': result.source,
       },
     );
   }

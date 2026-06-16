@@ -161,9 +161,6 @@ class _SplashScreenState extends State<SplashScreen>
             .isOnboardingComplete();
         final route = AppRoutes.routeAfterAuth(onboardingComplete: isComplete);
         if (mounted) {
-          if (kIsWeb && isComplete && await _tryRouteWebPushSparkSession()) {
-            return;
-          }
           Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
         }
       } catch (e) {
@@ -211,43 +208,6 @@ class _SplashScreenState extends State<SplashScreen>
         }
       }
     }
-  }
-
-  Future<bool> _tryRouteWebPushSparkSession() async {
-    final uri = Uri.base;
-    final matchId = uri.queryParameters['spark_match_id']?.trim();
-    final pushType = uri.queryParameters['push_type']?.trim() ?? 'unknown';
-    if (matchId == null || matchId.isEmpty) return false;
-
-    const source = 'pwa_launch_query';
-    await AndroidDiagnosticsService.instance.setValue(
-      'entry_point_before_navigation',
-      '$source:$pushType',
-    );
-    final result = await SupabaseService.instance
-        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
-    await AndroidDiagnosticsService.instance.setValues({
-      'canonical_resolver_source': source,
-      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
-      'canonical_resolver_reject_reason': result.canEnter
-          ? 'none'
-          : result.reason,
-      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
-        result.sessionKey,
-      ),
-    });
-    if (!mounted || !result.canEnter) return false;
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.sparkSessionScreen,
-      (route) => false,
-      arguments: {
-        'matchId': result.matchId,
-        'sessionId': result.sessionId,
-        'sessionKey': result.sessionKey,
-        'source': result.source,
-      },
-    );
-    return true;
   }
 
   @override

@@ -6,7 +6,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/external_return_repair_service.dart';
-import '../../services/android_diagnostics_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/realtime_notification_service.dart';
 import '../../services/video_repair_service.dart';
@@ -374,12 +373,10 @@ class MainShellScreenState extends State<MainShellScreen> {
             'SPARK SESSION: join tapped from Mutual Spark prompt — matchId=$matchId',
           );
           _removeMatchOverlay();
-          unawaited(
-            _openCanonicalSparkSession(
-              matchId: matchId,
-              matchedUserId: matchedUserId,
-              source: 'main_shell_mutual_match_popup',
-            ),
+          Navigator.pushNamed(
+            context,
+            AppRoutes.sparkSessionScreen,
+            arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
           );
         },
         onJoinLater: () {
@@ -391,50 +388,6 @@ class MainShellScreenState extends State<MainShellScreen> {
     // Insert into the root overlay so it appears above everything
     final overlay = Navigator.of(context, rootNavigator: true).overlay;
     overlay?.insert(_matchOverlayEntry!);
-  }
-
-  Future<void> _openCanonicalSparkSession({
-    required String matchId,
-    required String matchedUserId,
-    required String source,
-  }) async {
-    await AndroidDiagnosticsService.instance.setValue(
-      'entry_point_before_navigation',
-      source,
-    );
-    final result = await SupabaseService.instance
-        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
-    await AndroidDiagnosticsService.instance.setValues({
-      'canonical_resolver_source': source,
-      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
-      'canonical_resolver_reject_reason': result.canEnter
-          ? 'none'
-          : result.reason,
-      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
-        result.sessionKey,
-      ),
-    });
-    if (!mounted) return;
-    if (!result.canEnter) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not start Spark Session: ${result.reason}'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-      return;
-    }
-    Navigator.pushNamed(
-      context,
-      AppRoutes.sparkSessionScreen,
-      arguments: {
-        'matchId': result.matchId,
-        'matchedUserId': matchedUserId,
-        'sessionId': result.sessionId,
-        'sessionKey': result.sessionKey,
-        'source': result.source,
-      },
-    );
   }
 
   void _removeMatchOverlay() {

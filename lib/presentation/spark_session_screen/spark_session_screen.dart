@@ -37,7 +37,6 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
   // Match ID from route arguments
   String? _matchId;
   String? _matchedUserId;
-  String? _canonicalSource;
 
   // Session key from the waiting room — used for precise spark deduction
   String? _sessionKey;
@@ -50,7 +49,6 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
   bool _permissionDenied = false;
   Timer? _decisionStatusTimer;
   bool _chatNavigationStarted = false;
-  int _decisionStatusPolls = 0;
 
   @override
   void didChangeDependencies() {
@@ -59,12 +57,6 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     if (args is Map<String, dynamic>) {
       _matchId = args['matchId'] as String?;
       _matchedUserId = args['matchedUserId'] as String?;
-      _sessionKey ??= args['sessionKey'] as String?;
-      _sparkSessionId ??= args['sessionId'] as String?;
-      _canonicalSource ??= args['source'] as String?;
-      if (_canonicalSource != null && _canonicalSource!.isNotEmpty) {
-        debugPrint('SPARK SESSION: canonical source=$_canonicalSource');
-      }
     }
     if (_loadingProfile) {
       _checkFeatureGatingThenLoad();
@@ -74,26 +66,6 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
   /// Check spark balance before allowing session entry.
   /// Simple rule: if spark_balance > 0, allow. No tier gating.
   Future<void> _checkFeatureGatingThenLoad() async {
-    if (_matchId == null ||
-        _matchId!.isEmpty ||
-        ((_sparkSessionId == null || _sparkSessionId!.isEmpty) &&
-            (_sessionKey == null || _sessionKey!.isEmpty))) {
-      debugPrint(
-        'SPARK SESSION: blocked non-canonical entry — missing match/session metadata',
-      );
-      if (mounted) {
-        setState(() => _loadingProfile = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('This Spark Session is no longer active.'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-        Navigator.pop(context);
-      }
-      return;
-    }
-
     final uid = SupabaseService.instance.currentUserId;
     if (uid == null) {
       _loadOtherUserProfile();
@@ -140,26 +112,18 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         bool otherUserStarted = false;
         if (_matchId != null && _matchId!.isNotEmpty) {
           try {
-            Map<String, dynamic>? activeSession;
-            if (_sparkSessionId != null && _sparkSessionId!.isNotEmpty) {
-              activeSession = await SupabaseService.instance.client
-                  .from('spark_sessions')
-                  .select('id, initiated_by')
-                  .eq('id', _sparkSessionId!)
-                  .eq('match_id', _matchId!)
-                  .not('status', 'eq', 'ended')
-                  .isFilter('ended_at', null)
-                  .maybeSingle();
-            } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
-              activeSession = await SupabaseService.instance.client
-                  .from('spark_sessions')
-                  .select('id, initiated_by')
-                  .eq('match_id', _matchId!)
-                  .eq('session_key', _sessionKey!)
-                  .not('status', 'eq', 'ended')
-                  .isFilter('ended_at', null)
-                  .maybeSingle();
-            }
+            final tenMinutesAgo = DateTime.now()
+                .subtract(const Duration(minutes: 10))
+                .toIso8601String();
+            final activeSession = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('id, initiated_by')
+                .eq('match_id', _matchId!)
+                .not('status', 'eq', 'ended')
+                .isFilter('ended_at', null)
+                .gte('created_at', tenMinutesAgo)
+                .limit(1)
+                .maybeSingle();
             if (activeSession != null) {
               final initiatedBy = activeSession['initiated_by'] as String?;
               // If the other user initiated, this user can join without sparks
@@ -466,18 +430,9 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     // Only deduct if both users actually joined
     if (_matchId != null && _matchId!.isNotEmpty) {
       try {
-        // Use the canonical session row only — prevents picking up stale rows.
+        // Use session_key for precise row lookup — prevents picking up wrong session
         List<dynamic> sessions;
-        if (_sparkSessionId != null && _sparkSessionId!.isNotEmpty) {
-          sessions = await SupabaseService.instance.client
-              .from('spark_sessions')
-              .select(
-                'id, initiated_by, user_1_ready, user_2_ready, status, created_at',
-              )
-              .eq('id', _sparkSessionId!)
-              .eq('match_id', _matchId!)
-              .limit(1);
-        } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+        if (_sessionKey != null && _sessionKey!.isNotEmpty) {
           sessions = await SupabaseService.instance.client
               .from('spark_sessions')
               .select(
@@ -487,10 +442,14 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
               .eq('session_key', _sessionKey!)
               .limit(1);
         } else {
-          debugPrint(
-            'SPARK DEDUCT: missing canonical session id/key — skipping deduction',
-          );
-          return;
+          sessions = await SupabaseService.instance.client
+              .from('spark_sessions')
+              .select(
+                'id, initiated_by, user_1_ready, user_2_ready, status, created_at',
+              )
+              .eq('match_id', _matchId!)
+              .order('created_at', ascending: false)
+              .limit(1);
         }
 
         debugPrint(
@@ -610,9 +569,21 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         'SPARK DEDUCT: ✅ decremented spark_balance from $currentBalance to $newBalance for uid=$uid (tier=$tier)',
       );
 
-      debugPrint(
-        'SPARK DEDUCT: current_session_key preserved until both feedback decisions are submitted',
-      );
+      // CRITICAL FIX: Clear current_session_key after successful session completion
+      // so the next session starts completely fresh with no stale key.
+      if (_matchId != null && _matchId!.isNotEmpty) {
+        try {
+          await SupabaseService.instance.client
+              .from('matches')
+              .update({'current_session_key': null})
+              .eq('id', _matchId!);
+          debugPrint(
+            'SPARK DEDUCT: cleared current_session_key for matchId=$_matchId',
+          );
+        } catch (e) {
+          debugPrint('SPARK DEDUCT: could not clear session key — $e');
+        }
+      }
     } catch (e) {
       debugPrint('SPARK DEDUCT: Error decrementing spark_balance: $e');
     }
@@ -627,27 +598,15 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     if (_matchId == null || _matchId!.isEmpty) return;
 
     try {
-      Map<String, dynamic>? sessionRow;
-      if (_sparkSessionId != null && _sparkSessionId!.isNotEmpty) {
-        sessionRow = await SupabaseService.instance.client
-            .from('spark_sessions')
-            .select('initiated_by, user_1_ready, user_2_ready')
-            .eq('id', _sparkSessionId!)
-            .eq('match_id', _matchId!)
-            .maybeSingle();
-      } else if (_sessionKey != null && _sessionKey!.isNotEmpty) {
-        sessionRow = await SupabaseService.instance.client
-            .from('spark_sessions')
-            .select('initiated_by, user_1_ready, user_2_ready')
-            .eq('match_id', _matchId!)
-            .eq('session_key', _sessionKey!)
-            .maybeSingle();
-      } else {
-        debugPrint(
-          'SPARK REFUND: missing canonical session id/key — skipping refund',
-        );
-        return;
-      }
+      final sessionRow = await SupabaseService.instance.client
+          .from('spark_sessions')
+          .select(
+            'initiated_by, user_1_id, user_2_id, user_1_ready, user_2_ready',
+          )
+          .eq('match_id', _matchId!)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
 
       // Only refund if both users had joined (meaning a deduction occurred)
       final u1Ready = sessionRow?['user_1_ready'] == true;
@@ -659,7 +618,10 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         return;
       }
 
-      final initiatedBy = sessionRow?['initiated_by'] as String?;
+      String? initiatedBy = sessionRow?['initiated_by'] as String?;
+      if (initiatedBy == null || initiatedBy.isEmpty) {
+        initiatedBy = sessionRow?['user_1_id'] as String?;
+      }
 
       if (initiatedBy != uid) {
         debugPrint(
@@ -695,90 +657,114 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
       'SPARK SESSION: post-session decision submitted — spark=$didSpark',
     );
     final matchId = _matchId;
-    final sessionId = _sparkSessionId;
-    final sessionKey = _sessionKey;
+    final currentUserId = SupabaseService.instance.currentUserId;
 
-    if (matchId == null ||
-        matchId.isEmpty ||
-        sessionId == null ||
-        sessionId.isEmpty ||
-        sessionKey == null ||
-        sessionKey.isEmpty) {
-      debugPrint(
-        'SPARK SESSION: missing canonical session details — decision not submitted',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not save your response. Please try again.',
-              style: GoogleFonts.dmSans(color: Colors.white),
-            ),
-            backgroundColor: AppTheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      return;
-    }
+    if (matchId != null && currentUserId != null) {
+      try {
+        // Determine which user slot we are (user_1 or user_2)
+        final match = await SupabaseService.instance.client
+            .from('matches')
+            .select('user_1_id, user_2_id, status')
+            .eq('id', matchId)
+            .maybeSingle();
 
-    try {
-      final result = await SupabaseService.instance.submitSparkSessionDecision(
-        matchId: matchId,
-        sessionId: sessionId,
-        sessionKey: sessionKey,
-        didSpark: didSpark,
-      );
+        if (match != null) {
+          final isUser1 = match['user_1_id'] == currentUserId;
+          final wasChatUnlocked = match['status'] == 'chat_unlocked';
+          final decisionField = isUser1 ? 'decision_user_1' : 'decision_user_2';
+          final decision = didSpark ? 'spark' : 'skip';
 
-      debugPrint(
-        'SPARK SESSION: decision saved server-side — waiting=${result.waitingForOther} outcome=${result.outcome} status=${result.matchStatus}',
-      );
-
-      if (!mounted) return;
-
-      if (result.chatUnlocked || result.outcome == 'mutual_spark') {
-        try {
-          final match = await SupabaseService.instance.client
-              .from('matches')
-              .select('user_1_id, user_2_id')
-              .eq('id', matchId)
-              .maybeSingle();
-          if (match != null) {
-            await _sendChatUnlockedPush(matchId, match);
+          Map<String, dynamic>? session;
+          if (_sessionKey != null && _sessionKey!.isNotEmpty) {
+            session = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('id, decision_user_1, decision_user_2')
+                .eq('match_id', matchId)
+                .eq('session_key', _sessionKey!)
+                .limit(1)
+                .maybeSingle();
+          } else {
+            final sessions = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('id, decision_user_1, decision_user_2')
+                .eq('match_id', matchId)
+                .order('created_at', ascending: false)
+                .limit(1);
+            session = (sessions as List).isNotEmpty
+                ? Map<String, dynamic>.from(sessions.first)
+                : null;
           }
-        } catch (e) {
-          debugPrint('SPARK SESSION: chat unlock push failed — $e');
+
+          if (session != null) {
+            final sessionId = session['id'] as String?;
+            if (sessionId == null || sessionId.isEmpty) return;
+
+            await SupabaseService.instance.client
+                .from('spark_sessions')
+                .update({decisionField: decision})
+                .eq('id', sessionId);
+            debugPrint(
+              'SPARK SESSION: decision saved — sessionId=$sessionId field=$decisionField decision=$decision',
+            );
+
+            final updatedSession = await SupabaseService.instance.client
+                .from('spark_sessions')
+                .select('decision_user_1, decision_user_2')
+                .eq('id', sessionId)
+                .single();
+
+            final d1 = updatedSession['decision_user_1'];
+            final d2 = updatedSession['decision_user_2'];
+            if (d1 != null && d2 != null) {
+              final mutual = d1 == 'spark' && d2 == 'spark';
+              final outcome = mutual ? 'mutual_spark' : 'no_spark';
+              final matchStatus = mutual ? 'chat_unlocked' : 'session_ended';
+
+              // Update spark_session outcome
+              await SupabaseService.instance.client
+                  .from('spark_sessions')
+                  .update({
+                    'outcome': outcome,
+                    'status': 'ended',
+                    'ended_at': DateTime.now().toIso8601String(),
+                  })
+                  .eq('id', sessionId);
+
+              // Update match status
+              await SupabaseService.instance.client
+                  .from('matches')
+                  .update({'status': matchStatus, 'current_session_key': null})
+                  .eq('id', matchId);
+
+              // If mutual spark, navigate directly to chat thread
+              if (mutual && mounted) {
+                debugPrint(
+                  'SPARK SESSION: mutual Spark confirmed — sessionId=$sessionId matchId=$matchId',
+                );
+                if (!wasChatUnlocked) {
+                  await _sendChatUnlockedPush(matchId, match);
+                }
+                _navigateToChatAfterUnlock(matchId);
+                return;
+              }
+            } else if (didSpark) {
+              debugPrint(
+                'SPARK SESSION: waiting for other decision — sessionId=$sessionId matchId=$matchId',
+              );
+            }
+          }
         }
-        _navigateToChatAfterUnlock(matchId);
-        return;
-      }
-
-      setState(() {
-        _mutualSpark = didSpark && result.outcome != 'no_spark';
-        _waitingForOtherDecision = result.waitingForOther && didSpark;
-        _phase = SparkSessionPhase.outcome;
-      });
-
-      if (result.waitingForOther && didSpark) {
-        _startDecisionStatusWatcher();
-      }
-    } catch (e) {
-      debugPrint('SPARK SESSION: decision submission failed — $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not save your response. Please try again.',
-              style: GoogleFonts.dmSans(color: Colors.white),
-            ),
-            backgroundColor: AppTheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        setState(() => _phase = SparkSessionPhase.decision);
-      }
+      } catch (_) {}
     }
 
+    setState(() {
+      _mutualSpark = didSpark;
+      _waitingForOtherDecision = didSpark;
+      _phase = SparkSessionPhase.outcome;
+    });
+    if (didSpark) {
+      _startDecisionStatusWatcher();
+    }
     // Ensure wakelock is released after decision
     if (!kIsWeb) {
       WakelockPlus.disable();
@@ -787,19 +773,10 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
 
   void _startDecisionStatusWatcher() {
     final matchId = _matchId;
-    final sessionId = _sparkSessionId;
-    final sessionKey = _sessionKey;
-    if (matchId == null ||
-        matchId.isEmpty ||
-        sessionId == null ||
-        sessionId.isEmpty ||
-        sessionKey == null ||
-        sessionKey.isEmpty ||
-        _decisionStatusTimer != null) {
+    if (matchId == null || matchId.isEmpty || _decisionStatusTimer != null) {
       return;
     }
-    _decisionStatusPolls = 0;
-    debugPrint('SPARK SESSION: watching canonical session feedback status');
+    debugPrint('SPARK SESSION: watching match status after decision');
     _decisionStatusTimer = Timer.periodic(const Duration(seconds: 2), (
       timer,
     ) async {
@@ -807,60 +784,20 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         timer.cancel();
         return;
       }
-      _decisionStatusPolls += 1;
       try {
-        final session = await SupabaseService.instance.client
-            .from('spark_sessions')
-            .select('decision_user_1, decision_user_2, outcome, status')
-            .eq('id', sessionId)
-            .eq('match_id', matchId)
-            .eq('session_key', sessionKey)
-            .maybeSingle();
         final match = await SupabaseService.instance.client
             .from('matches')
             .select('status')
             .eq('id', matchId)
             .maybeSingle();
-        final outcome = session?['outcome'] as String? ?? '';
-        final d1 = session?['decision_user_1'];
-        final d2 = session?['decision_user_2'];
-        final bothDecisions = d1 != null && d2 != null;
         final status = match?['status'] as String? ?? '';
-        if (status == 'chat_unlocked' || outcome == 'mutual_spark') {
+        if (status == 'chat_unlocked') {
           timer.cancel();
           _decisionStatusTimer = null;
           _navigateToChatAfterUnlock(matchId);
-        } else if (status == 'session_ended' ||
-            outcome == 'no_spark' ||
-            bothDecisions) {
+        } else if (status == 'session_ended') {
           timer.cancel();
           _decisionStatusTimer = null;
-          if (mounted) {
-            setState(() {
-              _mutualSpark = false;
-              _waitingForOtherDecision = false;
-              _phase = SparkSessionPhase.outcome;
-            });
-          }
-        } else if (_decisionStatusPolls >= 90) {
-          timer.cancel();
-          _decisionStatusTimer = null;
-          if (mounted) {
-            setState(() {
-              _waitingForOtherDecision = false;
-              _phase = SparkSessionPhase.outcome;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Still waiting for their response. You can check chat later if you both Spark.',
-                  style: GoogleFonts.dmSans(color: Colors.white),
-                ),
-                backgroundColor: AppTheme.backgroundVariant,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
         }
       } catch (e) {
         debugPrint('SPARK SESSION: decision status watch error — $e');
@@ -1022,8 +959,6 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
         return SparkWaitingRoomWidget(
           otherUser: _safeOtherUser,
           matchId: _matchId,
-          initialSessionKey: _sessionKey,
-          initialSessionId: _sparkSessionId,
           onOtherUserJoined:
               ({
                 String? roomUrl,

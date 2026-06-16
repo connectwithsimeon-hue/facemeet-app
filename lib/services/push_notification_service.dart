@@ -453,10 +453,12 @@ class PushNotificationService {
           'SPARK SESSION: mutual match notification received — matchId=$matchId',
         );
         if (matchId != null && matchId.isNotEmpty) {
-          await _openCanonicalSparkSessionFromNotification(
-            navigator: navigator,
-            matchId: matchId,
-            source: 'notification_new_match',
+          _log(
+            'SPARK SESSION: route target after notification tap — sparkSessionScreen',
+          );
+          navigator.pushNamed(
+            AppRoutes.sparkSessionScreen,
+            arguments: {'matchId': matchId},
           );
         } else {
           _log(
@@ -471,10 +473,12 @@ class PushNotificationService {
       case 'new_spark':
         final matchId = data['match_id'] as String?;
         if (matchId != null && matchId.isNotEmpty) {
-          await _openCanonicalSparkSessionFromNotification(
-            navigator: navigator,
-            matchId: matchId,
-            source: 'notification_new_spark',
+          _log(
+            'SPARK SESSION: route target after notification tap — sparkSessionScreen from spark payload',
+          );
+          navigator.pushNamed(
+            AppRoutes.sparkSessionScreen,
+            arguments: {'matchId': matchId},
           );
         } else {
           _log(
@@ -512,12 +516,47 @@ class PushNotificationService {
           _log(
             'SPARK SESSION: invite notification received — matchId=$matchId',
           );
-          await _openCanonicalSparkSessionFromNotification(
-            navigator: navigator,
-            matchId: matchId,
-            source: 'notification_spark_session',
-            replaceStackWhenShellMissing: shell == null,
-          );
+          final eligibility = await SupabaseService.instance
+              .checkSparkSessionEntryEligibility(matchId: matchId);
+          if (!eligibility.canEnter) {
+            await AndroidDiagnosticsService.instance.setValues({
+              'suppressed_session_popup_reason': eligibility.reason,
+              'last_session_status': eligibility.sessionStatus ?? 'unknown',
+              'last_session_ended_at': eligibility.endedAtExists ? 'yes' : 'no',
+              'last_session_chat_unlocked': eligibility.chatUnlocked
+                  ? 'yes'
+                  : 'no',
+              'last_session_feedback_complete': eligibility.feedbackComplete
+                  ? 'yes'
+                  : 'no',
+            });
+            _log(
+              'SPARK SESSION: notification tap suppressed — reason=${eligibility.reason}',
+            );
+            return;
+          }
+          // Always navigate directly to the spark session waiting room
+          // with the correct matchId, regardless of where the notification
+          // was triggered from (chat or elsewhere).
+          if (shell != null) {
+            _log(
+              'SPARK SESSION: route target after notification tap — sparkSessionScreen',
+            );
+            navigator.pushNamed(
+              AppRoutes.sparkSessionScreen,
+              arguments: {'matchId': matchId},
+            );
+          } else {
+            _log(
+              'SPARK SESSION: route target after notification tap — sparkSessionScreen cold start',
+            );
+            // Shell not yet mounted — navigate via route (cold start)
+            navigator.pushNamedAndRemoveUntil(
+              AppRoutes.sparkSessionScreen,
+              (route) => false,
+              arguments: {'matchId': matchId},
+            );
+          }
         } else {
           // No matchId — fall back to Sessions tab refresh
           if (shell != null) {
@@ -534,66 +573,5 @@ class PushNotificationService {
         debugPrint('PUSH: Unknown notification type — $type');
         _log('PUSH: Unknown notification type — $type');
     }
-  }
-
-  Future<void> _openCanonicalSparkSessionFromNotification({
-    required NavigatorState navigator,
-    required String matchId,
-    required String source,
-    bool replaceStackWhenShellMissing = false,
-  }) async {
-    await AndroidDiagnosticsService.instance.setValue(
-      'entry_point_before_navigation',
-      source,
-    );
-    final result = await SupabaseService.instance
-        .startOrJoinCanonicalSparkSession(matchId: matchId, source: source);
-    await AndroidDiagnosticsService.instance.setValues({
-      'canonical_resolver_source': source,
-      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
-      'canonical_resolver_reject_reason': result.canEnter
-          ? 'none'
-          : result.reason,
-      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
-        result.sessionKey,
-      ),
-    });
-
-    if (!result.canEnter) {
-      await AndroidDiagnosticsService.instance.setValues({
-        'suppressed_session_popup_reason': result.reason,
-        'last_session_status': 'unknown',
-        'last_session_ended_at': 'unknown',
-        'last_session_chat_unlocked': 'unknown',
-        'last_session_feedback_complete': 'unknown',
-      });
-      _log(
-        'SPARK SESSION: notification tap suppressed — reason=${result.reason}',
-      );
-      return;
-    }
-
-    final arguments = {
-      'matchId': result.matchId,
-      'sessionId': result.sessionId,
-      'sessionKey': result.sessionKey,
-      'source': result.source,
-    };
-    if (replaceStackWhenShellMissing) {
-      _log(
-        'SPARK SESSION: route target after notification tap — canonical sparkSessionScreen cold start',
-      );
-      navigator.pushNamedAndRemoveUntil(
-        AppRoutes.sparkSessionScreen,
-        (route) => false,
-        arguments: arguments,
-      );
-      return;
-    }
-
-    _log(
-      'SPARK SESSION: route target after notification tap — canonical sparkSessionScreen',
-    );
-    navigator.pushNamed(AppRoutes.sparkSessionScreen, arguments: arguments);
   }
 }

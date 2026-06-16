@@ -49,6 +49,8 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
   // Incoming spark request state
   bool _showSparkRequestModal = false;
+  String? _incomingSessionId;
+  String? _incomingRoomUrl;
   bool _isStartingSession = false;
   String? _lastIncomingSparkSessionId;
 
@@ -142,27 +144,13 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     if (uid == null) return;
 
     try {
-      final match = await SupabaseService.instance.client
-          .from('matches')
-          .select('current_session_key')
-          .eq('id', _matchId)
-          .maybeSingle();
-      final currentSessionKey = (match?['current_session_key'] as String? ?? '')
-          .trim();
-      if (currentSessionKey.isEmpty) {
-        await AndroidDiagnosticsService.instance.setValues({
-          'fallback_latest_row_used': 'no',
-          'suppressed_session_popup_reason': 'no_current_session_key',
-        });
-        return;
-      }
       final record = await SupabaseService.instance.client
           .from('spark_sessions')
           .select(
             'id, initiated_by, status, ended_at, created_at, user_1_ready, user_2_ready, session_key, decision_user_1, decision_user_2, outcome',
           )
           .eq('match_id', _matchId)
-          .eq('session_key', currentSessionKey)
+          .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
       if (record != null) {
@@ -269,6 +257,7 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     );
     setState(() {
       _showSparkRequestModal = true;
+      _incomingSessionId = sessionId;
       _lastIncomingSparkSessionId = sessionId;
     });
   }
@@ -379,7 +368,13 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
     try {
       debugPrint('SPARK SESSION: join tapped from chat — matchId=$_matchId');
-      await _openCanonicalSparkSession(source: 'chat_spark_button');
+      if (mounted) {
+        Navigator.pushNamed(
+          context,
+          AppRoutes.sparkSessionScreen,
+          arguments: {'matchId': _matchId, 'matchedUserId': _otherUserId},
+        );
+      }
     } catch (e) {
       debugPrint('CHAT THREAD: error starting new Spark Session — $e');
       if (mounted) {
@@ -400,56 +395,29 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
   Future<void> _acceptSparkRequest() async {
     setState(() => _showSparkRequestModal = false);
-    await _openCanonicalSparkSession(source: 'chat_incoming_popup_accept');
-  }
-
-  Future<void> _openCanonicalSparkSession({required String source}) async {
-    await AndroidDiagnosticsService.instance.setValue(
-      'entry_point_before_navigation',
-      source,
-    );
-    final result = await SupabaseService.instance
-        .startOrJoinCanonicalSparkSession(matchId: _matchId, source: source);
-    await AndroidDiagnosticsService.instance.setValues({
-      'canonical_resolver_source': source,
-      'canonical_resolver_result': result.canEnter ? 'joinable' : 'rejected',
-      'canonical_resolver_reject_reason': result.canEnter
-          ? 'none'
-          : result.reason,
-      'session_key_used_for_navigation': AndroidDiagnosticsService.shortId(
-        result.sessionKey,
-      ),
-    });
-    if (!mounted) return;
-    if (!result.canEnter) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not start Spark Session: ${result.reason}',
-            style: GoogleFonts.dmSans(fontSize: 13),
-          ),
-          backgroundColor: AppTheme.error,
-        ),
+    if (mounted) {
+      Navigator.pushNamed(
+        context,
+        AppRoutes.sparkSessionScreen,
+        arguments: {'matchId': _matchId, 'matchedUserId': _otherUserId},
       );
-      return;
     }
-    Navigator.pushNamed(
-      context,
-      AppRoutes.sparkSessionScreen,
-      arguments: {
-        'matchId': result.matchId,
-        'matchedUserId': _otherUserId,
-        'sessionId': result.sessionId,
-        'sessionKey': result.sessionKey,
-        'source': result.source,
-      },
-    );
   }
 
   void _declineSparkRequest() {
     setState(() {
       _showSparkRequestModal = false;
+      _incomingSessionId = null;
+      _incomingRoomUrl = null;
     });
+    // Cancel the session row if possible
+    if (_incomingSessionId != null) {
+      SupabaseService.instance.client
+          .from('spark_sessions')
+          .delete()
+          .eq('id', _incomingSessionId!)
+          .catchError((_) {});
+    }
   }
 
   /// Load initial presence state and subscribe to live updates

@@ -151,8 +151,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     if (matchId == null || matchId.isEmpty) return;
 
     try {
-      // If sessionId was passed directly, use it; otherwise look it up by the
-      // canonical session_key. Never fall back to the newest row by match.
+      // If sessionId was passed directly, use it; otherwise look it up by matchId
       String? sessionId = widget.sessionId;
       if (sessionId == null || sessionId.isEmpty) {
         Map<String, dynamic>? row;
@@ -165,17 +164,40 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
               .limit(1)
               .maybeSingle();
         } else {
-          debugPrint(
-            'SPARK VIDEO CALL: missing canonical session id/key — not resolving by latest row',
-          );
-          return;
+          final rows = await SupabaseService.instance.client
+              .from('spark_sessions')
+              .select('id')
+              .eq('match_id', matchId)
+              .order('created_at', ascending: false)
+              .limit(1);
+          row = (rows as List).isNotEmpty
+              ? Map<String, dynamic>.from(rows.first)
+              : null;
         }
         sessionId = row?['id'] as String?;
       }
 
       if (sessionId == null) {
         debugPrint(
-          'SPARK VIDEO CALL: could not resolve canonical session ID for matchId=$matchId',
+          'SPARK VIDEO CALL: could not resolve session ID for matchId=$matchId — will retry in 2s',
+        );
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        final rows = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('id')
+            .eq('match_id', matchId)
+            .order('created_at', ascending: false)
+            .limit(1);
+        final row = (rows as List).isNotEmpty
+            ? Map<String, dynamic>.from(rows.first)
+            : null;
+        sessionId = row?['id'] as String?;
+      }
+
+      if (sessionId == null) {
+        debugPrint(
+          'SPARK VIDEO CALL: session ID still null after retry — skipping realtime listener',
         );
         return;
       }
@@ -471,7 +493,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
   Future<void> _markSessionEndedInSupabase() async {
     final sessionId = _resolvedSessionId;
     if (sessionId == null) {
-      // Try to resolve via canonical session_key only.
+      // Try to resolve via matchId as fallback
       final matchId = widget.matchId;
       if (matchId == null || matchId.isEmpty) return;
       try {
@@ -485,10 +507,15 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
               .limit(1)
               .maybeSingle();
         } else {
-          debugPrint(
-            'SPARK VIDEO CALL: missing canonical session id/key — not ending latest row',
-          );
-          return;
+          final rows = await SupabaseService.instance.client
+              .from('spark_sessions')
+              .select('id')
+              .eq('match_id', matchId)
+              .order('created_at', ascending: false)
+              .limit(1);
+          row = (rows as List).isNotEmpty
+              ? Map<String, dynamic>.from(rows.first)
+              : null;
         }
         final id = row?['id'] as String?;
         if (id == null) return;
@@ -514,6 +541,18 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
             'ended_at': DateTime.now().toIso8601String(),
           })
           .eq('id', sessionId);
+      final matchId = widget.matchId?.trim();
+      final sessionKey = widget.sessionKey?.trim();
+      if (matchId != null &&
+          matchId.isNotEmpty &&
+          sessionKey != null &&
+          sessionKey.isNotEmpty) {
+        await SupabaseService.instance.client
+            .from('matches')
+            .update({'current_session_key': null})
+            .eq('id', matchId)
+            .eq('current_session_key', sessionKey);
+      }
       debugPrint(
         'SPARK VIDEO CALL: session $sessionId marked as ended by $currentUserId',
       );

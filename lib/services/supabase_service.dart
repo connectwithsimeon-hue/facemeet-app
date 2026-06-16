@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import 'android_diagnostics_service.dart';
 import 'content_filter_service.dart';
 
 class SparkSessionEntryEligibility {
@@ -22,58 +21,6 @@ class SparkSessionEntryEligibility {
     this.chatUnlocked = false,
     this.feedbackComplete = false,
   });
-}
-
-class CanonicalSparkSessionStartResult {
-  final bool canEnter;
-  final String reason;
-  final String matchId;
-  final String? sessionId;
-  final String? sessionKey;
-  final String? otherUserId;
-  final String source;
-
-  const CanonicalSparkSessionStartResult({
-    required this.canEnter,
-    required this.reason,
-    required this.matchId,
-    required this.source,
-    this.sessionId,
-    this.sessionKey,
-    this.otherUserId,
-  });
-}
-
-class SparkSessionDecisionResult {
-  final bool success;
-  final bool waitingForOther;
-  final bool bothDecisionsReceived;
-  final bool chatUnlocked;
-  final String outcome;
-  final String matchStatus;
-  final String? error;
-
-  const SparkSessionDecisionResult({
-    required this.success,
-    required this.waitingForOther,
-    required this.bothDecisionsReceived,
-    required this.chatUnlocked,
-    required this.outcome,
-    required this.matchStatus,
-    this.error,
-  });
-
-  factory SparkSessionDecisionResult.fromJson(Map<String, dynamic> json) {
-    return SparkSessionDecisionResult(
-      success: json['success'] == true,
-      waitingForOther: json['waiting_for_other'] == true,
-      bothDecisionsReceived: json['both_decisions_received'] == true,
-      chatUnlocked: json['chat_unlocked'] == true,
-      outcome: (json['outcome'] as String? ?? '').trim(),
-      matchStatus: (json['match_status'] as String? ?? '').trim(),
-      error: json['error'] as String?,
-    );
-  }
 }
 
 class SupabaseService {
@@ -1192,158 +1139,21 @@ class SupabaseService {
   // SPARK SESSIONS
   // ============================================================
 
-  /// Canonical Spark Session start/join resolver.
-  ///
-  /// All user-facing Spark entry points should call this before navigating to
-  /// SparkSessionScreen. It intentionally accepts only match_id and lets the
-  /// Edge Function own session-key/room selection.
-  Future<CanonicalSparkSessionStartResult> startOrJoinCanonicalSparkSession({
-    required String matchId,
-    required String source,
-  }) async {
-    final cleanMatchId = matchId.trim();
-    final cleanSource = source.trim().isEmpty ? 'unknown' : source.trim();
-    if (cleanMatchId.isEmpty) {
-      return CanonicalSparkSessionStartResult(
-        canEnter: false,
-        reason: 'invalid_match',
-        matchId: cleanMatchId,
-        source: cleanSource,
-      );
-    }
-
-    debugPrint(
-      'CANONICAL SPARK: resolving source=$cleanSource matchId=$cleanMatchId',
-    );
-
-    try {
-      final match = await client
-          .from('matches')
-          .select('status, current_session_key')
-          .eq('id', cleanMatchId)
-          .maybeSingle();
-      if (match == null) {
-        return CanonicalSparkSessionStartResult(
-          canEnter: false,
-          reason: 'match_not_found',
-          matchId: cleanMatchId,
-          source: cleanSource,
-        );
-      }
-      final matchStatus = (match['status'] as String? ?? '').toLowerCase();
-      final currentSessionKey = (match['current_session_key'] as String? ?? '')
-          .trim();
-      final isManualNewSessionSource =
-          cleanSource == 'chat_spark_button' ||
-          cleanSource == 'sessions_tab_start';
-      if (matchStatus == 'chat_unlocked' &&
-          currentSessionKey.isEmpty &&
-          !isManualNewSessionSource) {
-        return CanonicalSparkSessionStartResult(
-          canEnter: false,
-          reason: 'chat_unlocked_no_active_session',
-          matchId: cleanMatchId,
-          source: cleanSource,
-        );
-      }
-
-      final response = await client.functions.invoke(
-        'spark_session_get_daily_access',
-        body: {'match_id': cleanMatchId, 'source': cleanSource},
-      );
-      final data = response.data;
-      if (data is Map && data['error'] != null) {
-        final reason = data['error'].toString();
-        debugPrint(
-          'CANONICAL SPARK: rejected source=$cleanSource reason=$reason',
-        );
-        return CanonicalSparkSessionStartResult(
-          canEnter: false,
-          reason: reason,
-          matchId: cleanMatchId,
-          source: cleanSource,
-        );
-      }
-      if (data is! Map) {
-        return CanonicalSparkSessionStartResult(
-          canEnter: false,
-          reason: 'spark session unavailable',
-          matchId: cleanMatchId,
-          source: cleanSource,
-        );
-      }
-
-      final canonicalMatchId = (data['match_id'] as String? ?? cleanMatchId)
-          .trim();
-      final sessionId = (data['session_id'] as String? ?? '').trim();
-      final sessionKey = (data['session_key'] as String? ?? '').trim();
-      final otherUserId = (data['other_user_id'] as String? ?? '').trim();
-      final notificationTargetUserIsSelf =
-          data['notification_target_user_is_self']?.toString() ?? 'unknown';
-      final notificationStatus =
-          data['notification_status']?.toString() ?? 'unknown';
-      final success =
-          data['success'] == true &&
-          data['active_joinable'] != false &&
-          canonicalMatchId.isNotEmpty &&
-          sessionId.isNotEmpty &&
-          sessionKey.isNotEmpty;
-
-      debugPrint(
-        'CANONICAL SPARK: result source=$cleanSource success=$success session present=${sessionId.isNotEmpty}',
-      );
-      debugPrint(
-        'CANONICAL SPARK: notification status=$notificationStatus targetSelf=$notificationTargetUserIsSelf',
-      );
-      await AndroidDiagnosticsService.instance.setValues({
-        'canonical_source': cleanSource,
-        'canonical_session_id_short': AndroidDiagnosticsService.shortId(
-          sessionId,
-        ),
-        'canonical_session_key_short': AndroidDiagnosticsService.shortId(
-          sessionKey,
-        ),
-        'canonical_result': success ? 'joinable' : 'rejected',
-        'canonical_reject_reason': success
-            ? 'none'
-            : 'spark session unavailable',
-        'notification_target_user_is_self': notificationTargetUserIsSelf,
-        'manual_repeat_after_chat_unlocked':
-            matchStatus == 'chat_unlocked' && isManualNewSessionSource
-            ? 'yes'
-            : 'no',
-      });
-
-      return CanonicalSparkSessionStartResult(
-        canEnter: success,
-        reason: success ? 'active_session' : 'spark session unavailable',
-        matchId: canonicalMatchId.isNotEmpty ? canonicalMatchId : cleanMatchId,
-        sessionId: sessionId.isEmpty ? null : sessionId,
-        sessionKey: sessionKey.isEmpty ? null : sessionKey,
-        otherUserId: otherUserId.isEmpty ? null : otherUserId,
-        source: cleanSource,
-      );
-    } catch (e) {
-      final reason = e.toString().replaceFirst('Exception: ', '').trim();
-      debugPrint('CANONICAL SPARK: failed source=$cleanSource reason=$reason');
-      return CanonicalSparkSessionStartResult(
-        canEnter: false,
-        reason: reason.isEmpty ? 'spark session unavailable' : reason,
-        matchId: cleanMatchId,
-        source: cleanSource,
-      );
-    }
-  }
-
   /// Create a spark session
-  @Deprecated('Use startOrJoinCanonicalSparkSession instead.')
   Future<Map<String, dynamic>?> createSparkSession({
     required String matchId,
     String? dailyRoomUrl,
   }) async {
-    throw UnsupportedError(
-      'Client-side Spark Session creation is disabled; use the canonical resolver.',
-    );
+    final response = await client
+        .from('spark_sessions')
+        .insert({
+          'match_id': matchId,
+          'daily_room_url': dailyRoomUrl,
+          'started_at': DateTime.now().toIso8601String(),
+        })
+        .select()
+        .single();
+    return response;
   }
 
   /// Mark current user as present in the spark session waiting room
@@ -1369,31 +1179,15 @@ class SupabaseService {
   Future<void> markUserReady({
     required String matchId,
     required bool isUser1,
-    String? sessionId,
-    String? sessionKey,
   }) async {
     final readyField = isUser1 ? 'user_1_ready' : 'user_2_ready';
-    final cleanSessionId = sessionId?.trim();
-    final cleanSessionKey = sessionKey?.trim();
-    if ((cleanSessionId == null || cleanSessionId.isEmpty) &&
-        (cleanSessionKey == null || cleanSessionKey.isEmpty)) {
-      throw UnsupportedError(
-        'Canonical ready updates require a session id or session key.',
-      );
-    }
     debugPrint(
       'SUPABASE markUserReady: setting $readyField=true for matchId=$matchId',
     );
-    var query = client
+    await client
         .from('spark_sessions')
         .update({readyField: true})
         .eq('match_id', matchId);
-    if (cleanSessionId != null && cleanSessionId.isNotEmpty) {
-      query = query.eq('id', cleanSessionId);
-    } else if (cleanSessionKey != null && cleanSessionKey.isNotEmpty) {
-      query = query.eq('session_key', cleanSessionKey);
-    }
-    await query;
     debugPrint(
       'SUPABASE markUserReady: ✅ $readyField set to true for matchId=$matchId',
     );
@@ -1479,48 +1273,53 @@ class SupabaseService {
     required String matchId,
     required String decision, // 'spark' or 'skip'
   }) async {
-    throw UnsupportedError(
-      'saveSparkDecision is deprecated. Use submitSparkSessionDecision with '
-      'the canonical session key so feedback is completed server-side.',
-    );
-  }
+    final uid = currentUserId;
+    if (uid == null) return;
 
-  Future<SparkSessionDecisionResult> submitSparkSessionDecision({
-    required String matchId,
-    required String sessionId,
-    required String sessionKey,
-    required bool didSpark,
-  }) async {
-    final cleanMatchId = matchId.trim();
-    final cleanSessionId = sessionId.trim();
-    final cleanSessionKey = sessionKey.trim();
-    if (cleanMatchId.isEmpty ||
-        cleanSessionId.isEmpty ||
-        cleanSessionKey.isEmpty) {
-      throw Exception('Missing active Spark Session details.');
+    // Determine if current user is user_1 or user_2
+    final match = await getMatch(matchId);
+    if (match == null) return;
+
+    final isUser1 = match['user_1_id'] == uid;
+    final decisionField = isUser1 ? 'decision_user_1' : 'decision_user_2';
+
+    await client
+        .from('spark_sessions')
+        .update({decisionField: decision})
+        .eq('id', sessionId);
+
+    // Check if both decisions are in and determine outcome
+    final session = await client
+        .from('spark_sessions')
+        .select()
+        .eq('id', sessionId)
+        .single();
+
+    final d1 = session['decision_user_1'];
+    final d2 = session['decision_user_2'];
+
+    if (d1 != null && d2 != null) {
+      final outcome = (d1 == 'spark' && d2 == 'spark')
+          ? 'mutual_spark'
+          : 'no_spark';
+      final matchStatus = outcome == 'mutual_spark'
+          ? 'chat_unlocked'
+          : 'session_ended';
+
+      await client
+          .from('spark_sessions')
+          .update({
+            'outcome': outcome,
+            'status': 'ended',
+            'ended_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', sessionId);
+
+      await client
+          .from('matches')
+          .update({'status': matchStatus, 'current_session_key': null})
+          .eq('id', matchId);
     }
-
-    final response = await client.rpc(
-      'submit_spark_session_decision',
-      params: {
-        'p_match_id': cleanMatchId,
-        'p_session_id': cleanSessionId,
-        'p_session_key': cleanSessionKey,
-        'p_decision': didSpark ? 'spark' : 'skip',
-      },
-    );
-
-    if (response is! Map) {
-      throw Exception('Unexpected Spark Session decision response.');
-    }
-
-    final result = SparkSessionDecisionResult.fromJson(
-      Map<String, dynamic>.from(response),
-    );
-    if (!result.success) {
-      throw Exception(result.error ?? 'Spark Session decision was not saved.');
-    }
-    return result;
   }
 
   /// Get spark session for a match
@@ -1567,18 +1366,6 @@ class SupabaseService {
       final matchStatus = (match['status'] as String? ?? '').toLowerCase();
       final currentSessionKey = (match['current_session_key'] as String? ?? '')
           .trim();
-      final cleanSessionId = sessionId?.trim();
-
-      if ((cleanSessionId == null || cleanSessionId.isEmpty) &&
-          currentSessionKey.isEmpty) {
-        return SparkSessionEntryEligibility(
-          canEnter: false,
-          reason: matchStatus == 'chat_unlocked'
-              ? 'chat_unlocked_no_active_session'
-              : 'no_active_session',
-          chatUnlocked: matchStatus == 'chat_unlocked',
-        );
-      }
 
       var query = client
           .from('spark_sessions')
@@ -1587,6 +1374,7 @@ class SupabaseService {
           )
           .eq('match_id', cleanMatchId);
 
+      final cleanSessionId = sessionId?.trim();
       if (cleanSessionId != null && cleanSessionId.isNotEmpty) {
         query = query.eq('id', cleanSessionId);
       } else if (currentSessionKey.isNotEmpty) {
