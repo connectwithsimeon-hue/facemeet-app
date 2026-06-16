@@ -56,6 +56,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
   // Simple 2-second polling timer — the only ready-detection mechanism
   Timer? _readyPollingTimer;
+  int _readyPollTickCount = 0;
   // 5-minute timeout timer
   Timer? _timeoutTimer;
 
@@ -116,6 +117,11 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       return;
     }
     _callLaunched = true;
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_launch_call_called': 'yes',
+      'spark_diag_room_join_mode': 'waiting_room_launch',
+      'spark_diag_waiting_reason': 'launch call requested',
+    });
     try {
       debugPrint(
         'SPARK WAITING ROOM: requesting secure Daily access for active session key=$_sessionKey',
@@ -144,6 +150,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     } catch (e) {
       debugPrint('SPARK SESSION: secure Daily access final failure — $e');
       _callLaunched = false;
+      await AndroidDiagnosticsService.instance.setValues({
+        'spark_diag_launch_call_called': 'failed',
+        'spark_diag_waiting_reason': AndroidDiagnosticsService.safeError(e),
+      });
       if (mounted) {
         setState(() {
           _isCreatingRoom = false;
@@ -165,6 +175,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       _roomReady = false;
       _callLaunched = false;
       _sessionKey = null;
+      _readyPollTickCount = 0;
     });
     _cancelTimers();
     _createRoomAndWait();
@@ -172,6 +183,8 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
   Future<void> _createRoomAndWait() async {
     if (!mounted) return;
+    final matchId = widget.matchId;
+    final currentUid = SupabaseService.instance.currentUserId;
     setState(() {
       _isCreatingRoom = true;
       _errorMessage = null;
@@ -182,10 +195,21 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       ),
       'waiting_overlay_active': 'yes',
       'waiting_overlay_reason': 'setting up spark session',
+      'spark_diag_current_user_short': AndroidDiagnosticsService.shortId(
+        currentUid,
+      ),
+      'spark_diag_match_id_short': AndroidDiagnosticsService.shortId(
+        widget.matchId,
+      ),
+      'spark_diag_user_slot': 'unknown',
+      'spark_diag_ready_update_attempted': 'no',
+      'spark_diag_ready_update_success': 'unknown',
+      'spark_diag_ready_update_error_safe': 'none',
+      'spark_diag_ready_poll_tick_count': 0,
+      'spark_diag_launch_call_called': 'no',
+      'spark_diag_room_join_mode': 'waiting_room',
+      'spark_diag_waiting_reason': 'setting up spark session',
     });
-
-    final matchId = widget.matchId;
-    final currentUid = SupabaseService.instance.currentUserId;
 
     debugPrint(
       'SPARK WAITING ROOM: ▶ User tapped Start Session — matchId=$matchId, currentUid=$currentUid',
@@ -220,6 +244,18 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           user2Id = match['user_2_id'] as String?;
           coordinationKey = match['current_session_key'] as String?;
           isUser1 = user1Id == currentUid;
+          await AndroidDiagnosticsService.instance.setValues({
+            'spark_diag_user_slot': isUser1 ? 'user_1' : 'user_2',
+            'spark_diag_current_user_short': AndroidDiagnosticsService.shortId(
+              currentUid,
+            ),
+            'spark_diag_match_id_short': AndroidDiagnosticsService.shortId(
+              matchId,
+            ),
+            'spark_diag_session_key_short': AndroidDiagnosticsService.shortId(
+              coordinationKey,
+            ),
+          });
           debugPrint(
             'SPARK WAITING ROOM: STEP 1 — current user is ${isUser1 ? "user_1" : "user_2"} '
             '(user_1_id=$user1Id, user_2_id=$user2Id, currentUid=$currentUid, current_session_key=$coordinationKey)',
@@ -331,15 +367,48 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
       // ── STEP 4: Mark this participant ready on the shared spark_session row ──
       try {
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_update_attempted': 'yes',
+          'spark_diag_ready_update_success': 'pending',
+          'spark_diag_ready_update_error_safe': 'none',
+          'spark_diag_session_id_short': AndroidDiagnosticsService.shortId(
+            access.sessionId,
+          ),
+          'spark_diag_session_key_short': AndroidDiagnosticsService.shortId(
+            access.sessionKey,
+          ),
+          'spark_diag_waiting_reason': 'ready update pending',
+        });
         await SupabaseService.instance.client
             .from('spark_sessions')
             .update({isUser1 ? 'user_1_ready' : 'user_2_ready': true})
             .eq('id', access.sessionId);
+        final readyReadback = await SupabaseService.instance.client
+            .from('spark_sessions')
+            .select('user_1_ready, user_2_ready, status')
+            .eq('id', access.sessionId)
+            .maybeSingle();
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_update_success': 'yes',
+          'spark_diag_ready_readback_user_1':
+              readyReadback?['user_1_ready'] == true ? 'true' : 'false',
+          'spark_diag_ready_readback_user_2':
+              readyReadback?['user_2_ready'] == true ? 'true' : 'false',
+          'spark_diag_ready_poll_latest_status':
+              readyReadback?['status']?.toString() ?? 'unknown',
+          'spark_diag_waiting_reason': 'ready update succeeded',
+        });
         debugPrint(
           'SPARK WAITING ROOM: ready flag updated for sessionId=${access.sessionId}',
         );
       } catch (e) {
         final errMsg = e.toString();
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_update_success': 'no',
+          'spark_diag_ready_update_error_safe':
+              AndroidDiagnosticsService.safeError(e),
+          'spark_diag_waiting_reason': 'ready update failed',
+        });
         debugPrint(
           'SPARK WAITING ROOM: ready-flag update failed — sessionId=${access.sessionId}, error=$errMsg',
         );
@@ -389,7 +458,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       try {
         final freshSession = await SupabaseService.instance.client
             .from('spark_sessions')
-            .select('user_1_ready, user_2_ready, daily_room_url')
+            .select('user_1_ready, user_2_ready, daily_room_url, status')
             .eq('id', access.sessionId)
             .maybeSingle();
         if (freshSession != null) {
@@ -409,6 +478,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
               'waiting_overlay_reason',
               'both ready; launching call',
             );
+            await AndroidDiagnosticsService.instance.setValue(
+              'spark_diag_waiting_reason',
+              'both ready; launching call',
+            );
             await _launchCall();
             return;
           }
@@ -426,6 +499,10 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         });
         await AndroidDiagnosticsService.instance.setValue(
           'waiting_overlay_reason',
+          'waiting for other participant ready flag',
+        );
+        await AndroidDiagnosticsService.instance.setValue(
+          'spark_diag_waiting_reason',
           'waiting for other participant ready flag',
         );
 
@@ -448,6 +525,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         await AndroidDiagnosticsService.instance.setValues({
           'waiting_overlay_active': 'yes',
           'waiting_overlay_reason': 'waiting room error',
+          'spark_diag_waiting_reason': 'waiting room error',
         });
         if (_isOutOfSparksError(errMsg)) {
           _showOutOfSparksSheet();
@@ -466,14 +544,14 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       if (_sessionKey != null && _sessionKey!.isNotEmpty) {
         session = await SupabaseService.instance.client
             .from('spark_sessions')
-            .select('daily_room_url, user_1_ready, user_2_ready')
+            .select('daily_room_url, user_1_ready, user_2_ready, status')
             .eq('match_id', matchId)
             .eq('session_key', _sessionKey!)
             .maybeSingle();
       } else {
         session = await SupabaseService.instance.client
             .from('spark_sessions')
-            .select('daily_room_url, user_1_ready, user_2_ready')
+            .select('daily_room_url, user_1_ready, user_2_ready, status')
             .eq('match_id', matchId)
             .limit(1)
             .maybeSingle();
@@ -486,6 +564,15 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         debugPrint(
           'SPARK WAITING ROOM: immediate ready check — user_1_ready=$u1, user_2_ready=$u2, room URL exists=${roomUrl != null && roomUrl.isNotEmpty}',
         );
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_readback_user_1': u1 ? 'true' : 'false',
+          'spark_diag_ready_readback_user_2': u2 ? 'true' : 'false',
+          'spark_diag_ready_poll_latest_user_1': u1 ? 'true' : 'false',
+          'spark_diag_ready_poll_latest_user_2': u2 ? 'true' : 'false',
+          'spark_diag_waiting_reason': u1 && u2
+              ? 'immediate check both ready'
+              : 'immediate check waiting',
+        });
         if (u1 && u2 && roomUrl != null) {
           debugPrint(
             'SPARK WAITING ROOM: ✅ both users ready (caught by immediate check) — launching call',
@@ -559,6 +646,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     debugPrint(
       'SPARK WAITING ROOM: ▶ starting 2-second ready polling for matchId=$matchId, sessionKey=$_sessionKey',
     );
+    _readyPollTickCount = 0;
 
     _readyPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (!mounted) {
@@ -567,6 +655,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       }
 
       final now = DateTime.now().toIso8601String();
+      _readyPollTickCount += 1;
 
       try {
         Map<String, dynamic>? session;
@@ -575,7 +664,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           // Precise lookup: find the exact row for this attempt
           session = await SupabaseService.instance.client
               .from('spark_sessions')
-              .select('daily_room_url, user_1_ready, user_2_ready')
+              .select('daily_room_url, user_1_ready, user_2_ready, status')
               .eq('match_id', matchId)
               .eq('session_key', _sessionKey!)
               .maybeSingle();
@@ -583,7 +672,9 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           // Fallback: no key yet (shouldn't happen, but be safe)
           session = await SupabaseService.instance.client
               .from('spark_sessions')
-              .select('daily_room_url, user_1_ready, user_2_ready, session_key')
+              .select(
+                'daily_room_url, user_1_ready, user_2_ready, session_key, status',
+              )
               .eq('match_id', matchId)
               .not('status', 'eq', 'ended')
               .order('created_at', ascending: false)
@@ -603,6 +694,11 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         }
 
         if (session == null) {
+          await AndroidDiagnosticsService.instance.setValues({
+            'spark_diag_ready_poll_tick_count': _readyPollTickCount,
+            'spark_diag_ready_poll_latest_status': 'no session row',
+            'spark_diag_waiting_reason': 'polling; no session row',
+          });
           debugPrint(
             'SPARK POLLING [$now]: no session row found yet for matchId=$matchId, key=$_sessionKey — continuing to poll',
           );
@@ -612,10 +708,20 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         final u1 = session['user_1_ready'] == true;
         final u2 = session['user_2_ready'] == true;
         final roomUrl = session['daily_room_url'] as String?;
+        final status = session['status']?.toString() ?? 'unknown';
 
         debugPrint(
           'SPARK POLLING [$now]: matchId=$matchId, key=$_sessionKey — user_1_ready=$u1, user_2_ready=$u2',
         );
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_poll_tick_count': _readyPollTickCount,
+          'spark_diag_ready_poll_latest_user_1': u1 ? 'true' : 'false',
+          'spark_diag_ready_poll_latest_user_2': u2 ? 'true' : 'false',
+          'spark_diag_ready_poll_latest_status': status,
+          'spark_diag_waiting_reason': u1 && u2
+              ? 'polling saw both ready'
+              : 'polling for both ready',
+        });
 
         if (u1 && u2 && roomUrl != null) {
           debugPrint(
@@ -627,6 +733,11 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         }
         // If only one flag is true, continue polling
       } catch (e) {
+        AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ready_poll_tick_count': _readyPollTickCount,
+          'spark_diag_ready_poll_latest_status': 'poll error',
+          'spark_diag_waiting_reason': AndroidDiagnosticsService.safeError(e),
+        });
         debugPrint(
           'SPARK POLLING [$now]: ❌ query failed — $e — continuing to poll',
         );
@@ -1178,6 +1289,55 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     );
   }
 
+  Widget _buildSparkDiagnosticsPanel() {
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 12,
+      child: SafeArea(
+        top: false,
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: AndroidDiagnosticsService.instance,
+            builder: (context, _) {
+              return FutureBuilder<List<String>>(
+                future: AndroidDiagnosticsService.instance
+                    .buildSparkRoomEntryLines(),
+                builder: (context, snapshot) {
+                  final lines = snapshot.data ?? const <String>[];
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(192),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withAlpha(28)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(
+                        [
+                          'Spark Room Diagnostics',
+                          ...lines,
+                        ].join('\n'),
+                        maxLines: 30,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.robotoMono(
+                          color: Colors.white,
+                          fontSize: 9,
+                          height: 1.16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1482,6 +1642,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
             ),
           ),
           _buildWaitingRoomSafetyMenu(),
+          _buildSparkDiagnosticsPanel(),
         ],
       ),
     );

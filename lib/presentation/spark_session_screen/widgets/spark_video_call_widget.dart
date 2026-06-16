@@ -983,6 +983,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
             ),
           if (kIsWeb) _buildWebOverlayControls(),
           _buildLiveSafetyMenu(),
+          _buildSparkDiagnosticsPanel(),
           // Fix 3: Error overlay — shown on top of video, user must explicitly dismiss or tap End Call
           if (_showErrorOverlay) _buildErrorOverlay(),
         ],
@@ -996,6 +997,55 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     return GestureDetector(
       onTap: () => setState(() => _showControls = !_showControls),
       child: content,
+    );
+  }
+
+  Widget _buildSparkDiagnosticsPanel() {
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: kIsWeb ? 108 : 112,
+      child: SafeArea(
+        top: false,
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: AndroidDiagnosticsService.instance,
+            builder: (context, _) {
+              return FutureBuilder<List<String>>(
+                future: AndroidDiagnosticsService.instance
+                    .buildSparkRoomEntryLines(),
+                builder: (context, snapshot) {
+                  final lines = snapshot.data ?? const <String>[];
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(192),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withAlpha(28)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(
+                        [
+                          'Spark Room Diagnostics',
+                          ...lines,
+                        ].join('\n'),
+                        maxLines: 30,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.robotoMono(
+                          color: Colors.white,
+                          fontSize: 9,
+                          height: 1.16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 

@@ -121,6 +121,13 @@ class DailyCallViewState extends State<DailyCallView> {
     debugPrint(
       'SPARK SESSION: Daily join attempt started — attempt=$_joinAttempt/$_maxJoinAttempts',
     );
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_native_daily_join_attempted': 'yes',
+      'spark_diag_native_daily_join_success': 'pending',
+      'spark_diag_native_daily_join_error_safe': 'none',
+      'spark_diag_room_join_mode': 'native_daily',
+      'spark_diag_waiting_reason': 'native Daily join pending',
+    });
     debugPrint('DAILY CALL VIEW: creating CallClient');
     try {
       // Step 1: Create CallClient
@@ -202,10 +209,14 @@ class DailyCallViewState extends State<DailyCallView> {
           _error = e.toString();
         });
         debugPrint('SPARK SESSION: Daily join final failure — $e');
-        AndroidDiagnosticsService.instance.setValue(
-          'native_daily_join_success',
-          'no',
-        );
+        AndroidDiagnosticsService.instance.setValues({
+          'native_daily_join_success': 'no',
+          'spark_diag_native_daily_join_success': 'no',
+          'spark_diag_native_daily_join_error_safe':
+              AndroidDiagnosticsService.safeError(e),
+          'spark_diag_waiting_reason':
+              AndroidDiagnosticsService.safeError(e),
+        });
         widget.onCallError?.call(e.toString());
       }
     }
@@ -236,10 +247,12 @@ class DailyCallViewState extends State<DailyCallView> {
 
       if (isJoined && !_connected) {
         _connected = true;
-        AndroidDiagnosticsService.instance.setValue(
-          'native_daily_join_success',
-          'yes',
-        );
+        AndroidDiagnosticsService.instance.setValues({
+          'native_daily_join_success': 'yes',
+          'spark_diag_native_daily_join_success': 'yes',
+          'spark_diag_native_daily_join_error_safe': 'none',
+          'spark_diag_waiting_reason': 'native Daily joined',
+        });
         debugPrint('SPARK SESSION: Daily join success');
         debugPrint(
           'DAILY CALL VIEW: call state=joined — local video track should be active',
@@ -284,10 +297,11 @@ class DailyCallViewState extends State<DailyCallView> {
         'DAILY CALL VIEW: participant joined — id=${p.id}, isLocal=${p.info.isLocal}',
       );
       if (!p.info.isLocal) {
-        AndroidDiagnosticsService.instance.setValue(
-          'last_daily_participant_event',
-          'participant-joined',
-        );
+        AndroidDiagnosticsService.instance.setValues({
+          'last_daily_participant_event': 'participant-joined',
+          'spark_diag_remote_participant_count': '1',
+          'spark_diag_waiting_reason': 'remote participant joined native Daily',
+        });
         debugPrint(
           'DAILY CALL VIEW: REMOTE participant joined — firing onRemoteParticipantJoined callback',
         );
@@ -300,10 +314,12 @@ class DailyCallViewState extends State<DailyCallView> {
       final p = event.participant;
       if (!p.info.isLocal) {
         final hasVideo = p.media?.camera.track != null;
-        AndroidDiagnosticsService.instance.setValue(
-          'last_daily_participant_event',
-          'participant-updated',
-        );
+        AndroidDiagnosticsService.instance.setValues({
+          'last_daily_participant_event': 'participant-updated',
+          'spark_diag_waiting_reason': hasVideo
+              ? 'remote participant video present'
+              : 'remote participant updated without video',
+        });
         debugPrint(
           'DAILY CALL VIEW: remote participant updated — id=${p.id}, hasVideoTrack=$hasVideo',
         );
@@ -314,6 +330,11 @@ class DailyCallViewState extends State<DailyCallView> {
 
     if (event is ParticipantLeftEvent) {
       debugPrint('DAILY CALL VIEW: remote participant left');
+      AndroidDiagnosticsService.instance.setValues({
+        'last_daily_participant_event': 'participant-left',
+        'spark_diag_remote_participant_count': '0',
+        'spark_diag_waiting_reason': 'remote participant left native Daily',
+      });
       if (mounted) setState(() {});
     }
   }
@@ -341,6 +362,10 @@ class DailyCallViewState extends State<DailyCallView> {
       key: remoteCount,
       'daily_participant_total_count': participants.length,
       'daily_remote_participant_ids': remoteIds.isEmpty ? 'none' : remoteIds,
+      'spark_diag_remote_participant_count': remoteCount,
+      'spark_diag_waiting_reason': remoteCount > 0
+          ? 'native remote participant present'
+          : 'native Daily joined; no remote participant yet',
     });
 
     if (remoteCount > 0) {

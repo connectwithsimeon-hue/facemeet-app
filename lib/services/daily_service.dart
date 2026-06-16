@@ -87,6 +87,15 @@ class DailyService {
     await AndroidDiagnosticsService.instance.setValues({
       'current_spark_match_id': AndroidDiagnosticsService.shortId(safeMatchId),
       'client_session_key': AndroidDiagnosticsService.shortId(safeSessionKey),
+      'spark_diag_match_id_short': AndroidDiagnosticsService.shortId(
+        safeMatchId,
+      ),
+      'spark_diag_session_key_short': AndroidDiagnosticsService.shortId(
+        safeSessionKey,
+      ),
+      'spark_diag_daily_access_attempted': 'yes',
+      'spark_diag_daily_access_success': 'pending',
+      'spark_diag_daily_access_error_safe': 'none',
     });
 
     try {
@@ -116,6 +125,14 @@ class DailyService {
           parsed.roomUrl,
         ),
         'meeting_token_received': parsed.meetingToken.isNotEmpty ? 'yes' : 'no',
+        'spark_diag_session_id_short': AndroidDiagnosticsService.shortId(
+          parsed.sessionId,
+        ),
+        'spark_diag_session_key_short': AndroidDiagnosticsService.shortId(
+          parsed.sessionKey,
+        ),
+        'spark_diag_daily_access_success': 'yes',
+        'spark_diag_daily_access_error_safe': 'none',
       });
       debugPrint(
         'SPARK DAILY ACCESS: access granted for matchId=${parsed.matchId}, sessionId=${parsed.sessionId}, token_present=${parsed.meetingToken.isNotEmpty}',
@@ -126,6 +143,8 @@ class DailyService {
       await AndroidDiagnosticsService.instance.setValues({
         'daily_access_succeeded': 'no',
         'meeting_token_received': 'no',
+        'spark_diag_daily_access_success': 'no',
+        'spark_diag_daily_access_error_safe': message,
       });
       debugPrint('SPARK DAILY ACCESS: request failed — $message');
       throw Exception(message);

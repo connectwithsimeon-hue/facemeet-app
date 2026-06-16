@@ -198,11 +198,49 @@ class AndroidDiagnosticsService extends ChangeNotifier {
       'last_session_ended_at',
       'last_session_chat_unlocked',
       'last_session_feedback_complete',
+      ...sparkRoomEntryDiagnosticKeys,
       'diagnostics_updated_at',
     ];
 
     return orderedKeys
         .map((key) => '$key: ${merged[key] ?? 'unknown'}')
+        .toList();
+  }
+
+  static const List<String> sparkRoomEntryDiagnosticKeys = [
+    'spark_diag_current_user_short',
+    'spark_diag_match_id_short',
+    'spark_diag_session_id_short',
+    'spark_diag_session_key_short',
+    'spark_diag_user_slot',
+    'spark_diag_daily_access_attempted',
+    'spark_diag_daily_access_success',
+    'spark_diag_daily_access_error_safe',
+    'spark_diag_ready_update_attempted',
+    'spark_diag_ready_update_success',
+    'spark_diag_ready_update_error_safe',
+    'spark_diag_ready_readback_user_1',
+    'spark_diag_ready_readback_user_2',
+    'spark_diag_ready_poll_tick_count',
+    'spark_diag_ready_poll_latest_user_1',
+    'spark_diag_ready_poll_latest_user_2',
+    'spark_diag_ready_poll_latest_status',
+    'spark_diag_launch_call_called',
+    'spark_diag_room_join_mode',
+    'spark_diag_native_daily_join_attempted',
+    'spark_diag_native_daily_join_success',
+    'spark_diag_native_daily_join_error_safe',
+    'spark_diag_web_daily_join_attempted',
+    'spark_diag_web_daily_join_success',
+    'spark_diag_web_daily_join_error_safe',
+    'spark_diag_remote_participant_count',
+    'spark_diag_waiting_reason',
+  ];
+
+  Future<List<String>> buildSparkRoomEntryLines() async {
+    await load();
+    return sparkRoomEntryDiagnosticKeys
+        .map((key) => '$key: ${_state[key] ?? 'unknown'}')
         .toList();
   }
 
@@ -263,6 +301,8 @@ class AndroidDiagnosticsService extends ChangeNotifier {
     if (text.length > 80) return '${text.substring(0, 77)}...';
     return text;
   }
+
+  static String safeError(Object error) => _safeError(error);
 
   static String _androidOsVersion() {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {

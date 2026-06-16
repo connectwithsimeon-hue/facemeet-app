@@ -6,6 +6,8 @@ import 'dart:ui_web' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../../services/android_diagnostics_service.dart';
+
 /// Web implementation for Daily Spark Sessions using a tokenized DailyIframe
 /// join flow inside an isolated iframe document.
 class SparkVideoWebView extends StatefulWidget {
@@ -58,6 +60,13 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
     debugPrint(
       'SPARK SESSION: web Daily join started — room URL present=${widget.roomUrl.isNotEmpty}, token present=${widget.meetingToken.isNotEmpty}',
     );
+    AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_web_daily_join_attempted': 'yes',
+      'spark_diag_web_daily_join_success': 'pending',
+      'spark_diag_web_daily_join_error_safe': 'none',
+      'spark_diag_room_join_mode': 'web_iframe',
+      'spark_diag_waiting_reason': 'web iframe loading',
+    });
     _registerDailyIframe();
     _listenForDailyMessages();
   }
@@ -150,21 +159,50 @@ class SparkVideoWebViewState extends State<SparkVideoWebView> {
       final type = (payload['type'] as String? ?? '').toLowerCase();
       if (type == 'joined') {
         debugPrint('SPARK SESSION: web Daily join success');
+        AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_web_daily_join_success': 'yes',
+          'spark_diag_web_daily_join_error_safe': 'none',
+          'spark_diag_waiting_reason': 'web Daily joined',
+        });
         _markConnected();
       } else if (type == 'participant-joined' ||
           type == 'remote-participant-joined') {
         debugPrint('SPARK SESSION: web Daily remote participant detected');
+        AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_remote_participant_count': '1',
+          'spark_diag_waiting_reason': 'web remote participant detected',
+        });
         _markParticipantSeen();
       } else if (type == 'left') {
         debugPrint('DAILY WEB END: Daily left event received');
         _requestFaceMeetEnd('Daily iframe leave message');
       } else if (type == 'remote-participant-left') {
         debugPrint('SPARK SESSION: web Daily remote participant left');
+        AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_remote_participant_count': '0',
+          'spark_diag_waiting_reason': 'web remote participant left',
+        });
       } else if (type == 'error') {
         final message = (payload['message'] as String? ?? 'Daily join failed')
             .trim();
         debugPrint('SPARK SESSION: web Daily error — $message');
+        AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_web_daily_join_success': 'no',
+          'spark_diag_web_daily_join_error_safe':
+              AndroidDiagnosticsService.safeError(message),
+          'spark_diag_waiting_reason':
+              AndroidDiagnosticsService.safeError(message),
+        });
         widget.onError?.call(message);
+      } else if (type == 'diagnostics') {
+        final values = payload['values'];
+        if (values is Map) {
+          AndroidDiagnosticsService.instance.setValues(
+            values.map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+        }
       } else if (type == 'mute-changed') {
         widget.onMuteChanged?.call(payload['muted'] == true);
       } else if (type == 'camera-changed') {

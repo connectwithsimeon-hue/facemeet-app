@@ -457,6 +457,10 @@
           window.parent.postMessage(JSON.stringify(payload), "*");
         }
 
+        function postDiagnostics(values) {
+          post("diagnostics", { values: values || {} });
+        }
+
         function extractMessage(error) {
           if (!error) return "Daily join failed";
           if (typeof error.message === "string" && error.message) return error.message;
@@ -678,6 +682,13 @@
 
           currentRemoteParticipant = remoteParticipant;
           remoteParticipantPresent = !!remoteParticipant;
+          postDiagnostics({
+            spark_diag_remote_participant_count:
+              remoteParticipantPresent ? "1" : "0",
+            spark_diag_waiting_reason: remoteParticipantPresent
+              ? "web iframe remote participant present"
+              : "web iframe waiting for remote participant",
+          });
 
           const localVideoTrackInfo = getTrackInfo(localParticipant, "video");
           const remoteVideoTrackInfo = getTrackInfo(remoteParticipant, "video");
@@ -749,6 +760,11 @@
 
           callObject.on("joined-meeting", function () {
             hasJoinedMeeting = true;
+            postDiagnostics({
+              spark_diag_web_daily_join_success: "yes",
+              spark_diag_web_daily_join_error_safe: "none",
+              spark_diag_waiting_reason: "web iframe joined-meeting event",
+            });
             startParticipantPolling();
             renderParticipants();
             scheduleParticipantRefresh();
@@ -809,6 +825,11 @@
           });
 
           callObject.on("error", function (event) {
+            postDiagnostics({
+              spark_diag_web_daily_join_success: "no",
+              spark_diag_web_daily_join_error_safe: extractMessage(event),
+              spark_diag_waiting_reason: extractMessage(event),
+            });
             post("error", { message: extractMessage(event) });
           });
 
@@ -879,11 +900,24 @@
         async function startJoin() {
           if (joinInFlight) return;
           if (!activeRoomUrl || !activeMeetingToken) {
+            postDiagnostics({
+              spark_diag_web_daily_join_attempted: "yes",
+              spark_diag_web_daily_join_success: "no",
+              spark_diag_web_daily_join_error_safe: "missing secure access",
+              spark_diag_waiting_reason: "web iframe missing secure access",
+            });
             post("error", { message: "Secure Spark Session access is missing." });
             return;
           }
 
           joinInFlight = true;
+          postDiagnostics({
+            spark_diag_web_daily_join_attempted: "yes",
+            spark_diag_web_daily_join_success: "pending",
+            spark_diag_web_daily_join_error_safe: "none",
+            spark_diag_room_join_mode: "web_iframe",
+            spark_diag_waiting_reason: "web iframe Daily join pending",
+          });
           try {
             const call = await ensureCallObject();
             localAudioEnabled = true;
@@ -898,8 +932,18 @@
             startParticipantPolling();
             renderParticipants();
             scheduleParticipantRefresh();
+            postDiagnostics({
+              spark_diag_web_daily_join_success: "yes",
+              spark_diag_web_daily_join_error_safe: "none",
+              spark_diag_waiting_reason: "web iframe Daily joined",
+            });
             postJoinedOnce();
           } catch (error) {
+            postDiagnostics({
+              spark_diag_web_daily_join_success: "no",
+              spark_diag_web_daily_join_error_safe: extractMessage(error),
+              spark_diag_waiting_reason: extractMessage(error),
+            });
             post("error", { message: extractMessage(error) });
           } finally {
             joinInFlight = false;
