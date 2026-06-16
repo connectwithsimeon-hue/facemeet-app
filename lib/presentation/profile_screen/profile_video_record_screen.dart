@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -254,6 +253,14 @@ class _ProfileVideoRecordScreenState extends State<ProfileVideoRecordScreen>
 
       if (mounted) {
         setState(() => _uploadStatusTitle = 'Checking your video...');
+      }
+
+      if (moderationFrames.isNotEmpty) {
+        final thumbnailUrl = await SupabaseService.instance
+            .uploadProfileThumbnailBytes(moderationFrames.first);
+        debugPrint(
+          'THUMBNAIL WEB UPLOAD: profile screen saved yes/no=${thumbnailUrl?.isNotEmpty == true}',
+        );
       }
 
       final frameUrls = <String>[];

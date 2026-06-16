@@ -5,7 +5,6 @@ import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_thumbnail_plus/video_thumbnail_plus.dart' as vtp;
 import 'dart:io';
-import 'dart:typed_data';
 import '../../../theme/app_theme.dart';
 import '../../../services/supabase_service.dart';
 import '../../../services/web_profile_video_picker_stub.dart'
@@ -260,6 +259,14 @@ class _OnboardingStep4WidgetState extends State<OnboardingStep4Widget>
 
       if (mounted) {
         setState(() => _uploadStatusTitle = 'Checking your video...');
+      }
+
+      if (moderationFrames.isNotEmpty) {
+        final thumbnailUrl = await SupabaseService.instance
+            .uploadProfileThumbnailBytes(moderationFrames.first);
+        debugPrint(
+          'THUMBNAIL WEB UPLOAD: onboarding saved yes/no=${thumbnailUrl?.isNotEmpty == true}',
+        );
       }
 
       final frameUrls = <String>[];

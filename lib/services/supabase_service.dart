@@ -1893,6 +1893,42 @@ class SupabaseService {
     }
   }
 
+  /// Upload thumbnail JPEG bytes from web/PWA and save a durable public URL.
+  Future<String?> uploadProfileThumbnailBytes(Uint8List bytes) async {
+    final uid = currentUserId;
+    if (uid == null || bytes.isEmpty) return null;
+
+    try {
+      final storagePath = '$uid/thumbnail.jpg';
+
+      await client.storage
+          .from('profile-thumbnails')
+          .uploadBinary(
+            storagePath,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
+
+      final url = client.storage
+          .from('profile-thumbnails')
+          .getPublicUrl(storagePath);
+
+      if (url.isNotEmpty) {
+        await client.from('users').update({'thumbnail_url': url}).eq('id', uid);
+        debugPrint(
+          'THUMBNAIL WEB UPLOAD: uploaded and saved thumbnail_url exists=yes',
+        );
+      }
+      return url;
+    } catch (e) {
+      debugPrint('THUMBNAIL WEB UPLOAD: failed — $e');
+      return null;
+    }
+  }
+
   /// Get the total number of interactions sent by the current user (for debug logging)
   Future<int> getInteractionCount() async {
     final uid = currentUserId;

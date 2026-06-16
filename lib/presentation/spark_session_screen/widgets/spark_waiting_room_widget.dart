@@ -8,7 +8,6 @@ import '../../../routes/app_routes.dart';
 import '../../../services/android_diagnostics_service.dart';
 import '../../../services/daily_service.dart';
 import '../../../services/supabase_service.dart';
-import '../../../services/web_push_notification_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/profile_avatar.dart';
 import '../../../widgets/user_safety_actions.dart';
@@ -449,15 +448,9 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
               data: {'match_id': matchId, 'type': 'spark_session'},
             );
           }
-          if (currentUid != null && currentUid.isNotEmpty) {
-            await WebPushNotificationService.instance.sendWebPushNotification(
-              userId: currentUid,
-              type: 'spark_session',
-              title: 'Your Spark Session is ready',
-              body: 'Tap to join your 3-minute video date.',
-              data: {'match_id': matchId, 'type': 'spark_session'},
-            );
-          }
+          debugPrint(
+            'SESSION PUSH: self-notification skipped for initiating user',
+          );
         }
       } catch (e) {
         debugPrint('SESSION PUSH: success/failure=false — $e');
@@ -1081,14 +1074,37 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     required Map<String, dynamic> data,
   }) async {
     try {
+      final senderUserId = SupabaseService.instance.currentUserId;
+      String? senderThumbnailUrl;
+      try {
+        final senderProfile = await SupabaseService.instance
+            .getCurrentUserProfile();
+        senderThumbnailUrl =
+            (senderProfile?['thumbnail_url'] as String?)?.trim().isNotEmpty ==
+                true
+            ? senderProfile!['thumbnail_url'] as String
+            : null;
+      } catch (e) {
+        debugPrint('PUSH NOTIFICATION: sender thumbnail lookup skipped — $e');
+      }
+      final notificationData = {
+        ...data,
+        'type': type,
+        if (senderUserId != null) 'sender_user_id': senderUserId,
+        if (senderThumbnailUrl != null)
+          'sender_thumbnail_url': senderThumbnailUrl,
+        if (senderThumbnailUrl != null) 'image': senderThumbnailUrl,
+      };
       final response = await SupabaseService.instance.client.functions.invoke(
         'send_push_notification',
         body: {
           'user_id': userId,
+          'target_user_id': userId,
+          if (senderUserId != null) 'sender_user_id': senderUserId,
           'type': type,
           'title': title,
           'body': body,
-          'data': {...data, 'type': type},
+          'data': notificationData,
         },
       );
       final responseData = response.data;
