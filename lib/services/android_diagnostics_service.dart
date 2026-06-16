@@ -249,6 +249,13 @@ class AndroidDiagnosticsService extends ChangeNotifier {
     'spark_diag_duplicate_session_guard',
     'spark_diag_lock_used',
     'spark_diag_waiting_reason',
+    'spark_diag_repeat_invite_created',
+    'spark_diag_repeat_invite_target_user_short',
+    'spark_diag_repeat_popup_seen',
+    'spark_diag_repeat_popup_suppressed_reason',
+    'spark_diag_repeat_popup_source',
+    'spark_diag_repeat_popup_match_id_short',
+    'spark_diag_repeat_popup_session_key_short',
   ];
 
   Future<List<String>> buildSparkRoomEntryLines() async {

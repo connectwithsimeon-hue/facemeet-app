@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/external_return_repair_service.dart';
+import '../../services/android_diagnostics_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/realtime_notification_service.dart';
 import '../../services/video_repair_service.dart';
@@ -61,6 +62,8 @@ class MainShellScreenState extends State<MainShellScreen> {
   RealtimeChannel? _matchesChannel;
   // Realtime subscription for pending match count badge
   RealtimeChannel? _pendingMatchesChannel;
+  // Realtime subscription for foreground repeat Spark Session invites
+  RealtimeChannel? _repeatSparkSessionsChannel;
 
   // Auto-reconnect timer
   Timer? _reconnectTimer;
@@ -87,6 +90,7 @@ class MainShellScreenState extends State<MainShellScreen> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _subscribeToNewMatches();
+    _subscribeToRepeatSparkSessionInvites();
     _loadPendingMatchCount();
     _subscribeToPendingMatchCount();
     _startReconnectWatcher();
@@ -347,6 +351,217 @@ class MainShellScreenState extends State<MainShellScreen> {
         });
   }
 
+  void _subscribeToRepeatSparkSessionInvites() {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null) return;
+
+    _repeatSparkSessionsChannel = SupabaseService.instance.client
+        .channel('repeat_spark_invites:$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'spark_sessions',
+          callback: (payload) {
+            unawaited(_handleRepeatSparkSessionRecord(payload.newRecord));
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'spark_sessions',
+          callback: (payload) {
+            unawaited(_handleRepeatSparkSessionRecord(payload.newRecord));
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _handleRepeatSparkSessionRecord(
+    Map<String, dynamic> record,
+  ) async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null || !mounted) return;
+
+    final matchId = (record['match_id'] as String? ?? '').trim();
+    final sessionId = (record['id'] as String? ?? '').trim();
+    final initiatorId = (record['initiated_by'] as String? ?? '').trim();
+    final status = (record['status'] as String? ?? '').toLowerCase();
+    final endedAt = (record['ended_at'] as String? ?? '').trim();
+    final sessionKey = (record['session_key'] as String? ?? '').trim();
+
+    if (matchId.isEmpty || sessionId.isEmpty) return;
+    if (initiatorId.isEmpty || initiatorId == uid) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: initiatorId == uid ? 'self_initiated' : 'missing_initiator',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+    if (status == 'ended' || endedAt.isNotEmpty) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'session_ended',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    Map<String, dynamic>? match;
+    try {
+      match = await SupabaseService.instance.client
+          .from('matches')
+          .select('id,user_1_id,user_2_id,status,current_session_key')
+          .eq('id', matchId)
+          .maybeSingle();
+    } catch (e) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'match_lookup_failed',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      debugPrint('REPEAT SPARK POPUP: match lookup failed — $e');
+      return;
+    }
+
+    if (match == null ||
+        (match['user_1_id'] != uid && match['user_2_id'] != uid)) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'not_match_participant',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    final matchStatus = (match['status'] as String? ?? '').toLowerCase();
+    if (matchStatus != 'chat_unlocked') {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'unsupported_match_status',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    final currentSessionKey = (match['current_session_key'] as String? ?? '')
+        .trim();
+    if (currentSessionKey.isEmpty || currentSessionKey != sessionKey) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'stale_session_key',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    final isUser1 = match['user_1_id'] == uid;
+    final userAlreadyReady =
+        record[isUser1 ? 'user_1_ready' : 'user_2_ready'] == true;
+    if (userAlreadyReady) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'current_user_already_joined',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    final eligibility = await SupabaseService.instance
+        .checkSparkSessionEntryEligibility(
+          matchId: matchId,
+          sessionId: sessionId,
+        );
+    if (!eligibility.canEnter) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: eligibility.reason,
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
+
+    final matchedUserId = match['user_1_id'] == uid
+        ? match['user_2_id'] as String
+        : match['user_1_id'] as String;
+    Map<String, dynamic>? profile;
+    try {
+      profile = await SupabaseService.instance.getUserProfile(matchedUserId);
+    } catch (_) {}
+
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_repeat_popup_seen': 'yes',
+      'spark_diag_repeat_popup_suppressed_reason': 'shown',
+      'spark_diag_repeat_popup_source': 'main_shell_realtime',
+      'spark_diag_repeat_popup_match_id_short':
+          AndroidDiagnosticsService.shortId(matchId),
+      'spark_diag_repeat_popup_session_key_short':
+          AndroidDiagnosticsService.shortId(sessionKey),
+    });
+
+    if (!mounted) return;
+    _showMatchModal(
+      matchId: matchId,
+      matchedUserId: matchedUserId,
+      name: profile?['first_name'] as String? ?? 'Someone',
+      city: profile?['city'] as String? ?? '',
+      thumbnailUrl: profile?['thumbnail_url'] as String?,
+      body:
+          '${profile?['first_name'] as String? ?? 'Your match'} wants to start another Spark Session right now.',
+      ctaLabel: 'Join Spark Session now',
+      onJoinOverride: () {
+        unawaited(_acceptRepeatSparkInvite(matchId, matchedUserId));
+      },
+    );
+  }
+
+  Future<void> _recordRepeatSparkPopupSuppressed({
+    required String reason,
+    required String matchId,
+    required String sessionKey,
+  }) async {
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_repeat_popup_seen': 'no',
+      'spark_diag_repeat_popup_suppressed_reason': reason,
+      'spark_diag_repeat_popup_source': 'main_shell_realtime',
+      'spark_diag_repeat_popup_match_id_short':
+          AndroidDiagnosticsService.shortId(matchId),
+      'spark_diag_repeat_popup_session_key_short':
+          AndroidDiagnosticsService.shortId(sessionKey),
+    });
+  }
+
+  Future<void> _acceptRepeatSparkInvite(
+    String matchId,
+    String matchedUserId,
+  ) async {
+    final eligibility = await SupabaseService.instance
+        .checkSparkSessionEntryEligibility(matchId: matchId);
+    if (!mounted) return;
+    if (!eligibility.canEnter) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: eligibility.reason,
+        matchId: matchId,
+        sessionKey: '',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That Spark Session is no longer available.'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      return;
+    }
+
+    _removeMatchOverlay();
+    Navigator.pushNamed(
+      context,
+      AppRoutes.sparkSessionScreen,
+      arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
+    );
+  }
+
   // ── Full-screen modal overlay via root navigator OverlayEntry ──
   void _showMatchModal({
     required String matchId,
@@ -354,6 +569,9 @@ class MainShellScreenState extends State<MainShellScreen> {
     required String name,
     required String city,
     required String? thumbnailUrl,
+    String? body,
+    String ctaLabel = 'Join Spark Session now',
+    VoidCallback? onJoinOverride,
   }) {
     // Remove any existing overlay first
     _removeMatchOverlay();
@@ -372,16 +590,22 @@ class MainShellScreenState extends State<MainShellScreen> {
           debugPrint(
             'SPARK SESSION: join tapped from Mutual Spark prompt — matchId=$matchId',
           );
-          _removeMatchOverlay();
-          Navigator.pushNamed(
-            context,
-            AppRoutes.sparkSessionScreen,
-            arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
-          );
+          if (onJoinOverride != null) {
+            onJoinOverride();
+          } else {
+            _removeMatchOverlay();
+            Navigator.pushNamed(
+              context,
+              AppRoutes.sparkSessionScreen,
+              arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
+            );
+          }
         },
         onJoinLater: () {
           _removeMatchOverlay();
         },
+        body: body,
+        ctaLabel: ctaLabel,
       ),
     );
 
@@ -400,6 +624,7 @@ class MainShellScreenState extends State<MainShellScreen> {
     _reconnectTimer?.cancel();
     _matchesChannel?.unsubscribe();
     _pendingMatchesChannel?.unsubscribe();
+    _repeatSparkSessionsChannel?.unsubscribe();
     _notifSubscription?.cancel();
     _externalReturnRepairSubscription?.cancel();
     RealtimeNotificationService.instance.dispose();
@@ -588,6 +813,8 @@ class _SparkMatchModal extends StatefulWidget {
   final String? thumbnailUrl;
   final VoidCallback onJoinNow;
   final VoidCallback onJoinLater;
+  final String? body;
+  final String ctaLabel;
 
   const _SparkMatchModal({
     required this.matchId,
@@ -597,6 +824,8 @@ class _SparkMatchModal extends StatefulWidget {
     required this.thumbnailUrl,
     required this.onJoinNow,
     required this.onJoinLater,
+    this.body,
+    required this.ctaLabel,
   });
 
   @override
@@ -770,7 +999,8 @@ class _SparkMatchModalState extends State<_SparkMatchModal>
                           ],
                           const SizedBox(height: 16),
                           Text(
-                            'You have a mutual Spark with ${widget.name} — they are waiting for you right now.',
+                            widget.body ??
+                                'You have a mutual Spark with ${widget.name} — they are waiting for you right now.',
                             style: GoogleFonts.dmSans(
                               fontSize: 15,
                               color: Colors.white,
@@ -806,7 +1036,7 @@ class _SparkMatchModalState extends State<_SparkMatchModal>
                                   ],
                                 ),
                                 child: Text(
-                                  'Join Spark Session now',
+                                  widget.ctaLabel,
                                   style: GoogleFonts.dmSans(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w700,

@@ -252,6 +252,17 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       return;
     }
 
+    final sessionKey = record['session_key'] as String?;
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_repeat_popup_seen': 'yes',
+      'spark_diag_repeat_popup_source': 'chat_thread_realtime',
+      'spark_diag_repeat_popup_match_id_short':
+          AndroidDiagnosticsService.shortId(_matchId),
+      'spark_diag_repeat_popup_session_key_short':
+          AndroidDiagnosticsService.shortId(sessionKey),
+      'spark_diag_repeat_popup_suppressed_reason': 'shown',
+    });
+
     debugPrint(
       'CHAT THREAD: incoming Spark Session detected — sessionId=$sessionId initiatedBy=$initiatorId status=$status',
     );
@@ -277,7 +288,7 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       if (match == null) return false;
 
       final matchStatus = (match['status'] as String? ?? '').toLowerCase();
-      if (matchStatus == 'chat_unlocked' || matchStatus == 'session_ended') {
+      if (matchStatus == 'session_ended') {
         return true;
       }
 
@@ -304,6 +315,10 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
   }) async {
     await AndroidDiagnosticsService.instance.setValues({
       'suppressed_session_popup_reason': reason,
+      'spark_diag_repeat_popup_suppressed_reason': reason,
+      'spark_diag_repeat_popup_source': 'chat_thread_realtime',
+      'spark_diag_repeat_popup_match_id_short':
+          AndroidDiagnosticsService.shortId(_matchId),
       'last_session_status': status.isEmpty ? 'unknown' : status,
       'last_session_ended_at': endedAtExists ? 'yes' : 'no',
       'last_session_chat_unlocked': chatUnlocked ? 'yes' : 'no',
@@ -368,6 +383,13 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
     try {
       debugPrint('SPARK SESSION: join tapped from chat — matchId=$_matchId');
+      await AndroidDiagnosticsService.instance.setValues({
+        'spark_diag_repeat_invite_created': 'chat_start_navigate',
+        'spark_diag_repeat_invite_target_user_short':
+            AndroidDiagnosticsService.shortId(_otherUserId),
+        'spark_diag_repeat_popup_match_id_short':
+            AndroidDiagnosticsService.shortId(_matchId),
+      });
       if (mounted) {
         Navigator.pushNamed(
           context,
@@ -395,6 +417,26 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
 
   Future<void> _acceptSparkRequest() async {
     setState(() => _showSparkRequestModal = false);
+    final eligibility = await SupabaseService.instance
+        .checkSparkSessionEntryEligibility(matchId: _matchId);
+    if (!eligibility.canEnter) {
+      await _recordSuppressedSparkPopup(
+        reason: eligibility.reason,
+        status: eligibility.sessionStatus ?? 'unknown',
+        endedAtExists: eligibility.endedAtExists,
+        chatUnlocked: eligibility.chatUnlocked,
+        feedbackComplete: eligibility.feedbackComplete,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('That Spark Session is no longer available.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+      return;
+    }
     if (mounted) {
       Navigator.pushNamed(
         context,
