@@ -48,6 +48,18 @@ type UserRow = {
   first_name: string | null;
 };
 
+class SafeFunctionError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+
+  constructor(code: string, details?: Record<string, unknown>) {
+    super(code);
+    this.name = "SafeFunctionError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -65,8 +77,11 @@ function isUuid(value: string) {
 }
 
 function safeDisplayName(firstName: string | null | undefined) {
-  const name = normalizeString(firstName);
-  return name || "FaceMeet Member";
+  const name = normalizeString(firstName)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (name || "FaceMeet Member").slice(0, 40);
 }
 
 function safeErrorMessage(error: unknown) {
@@ -92,6 +107,7 @@ function safeErrorMessage(error: unknown) {
 }
 
 function safeErrorCode(error: unknown) {
+  if (error instanceof SafeFunctionError) return error.code;
   const text = error instanceof Error ? error.message : String(error ?? "");
   const knownCodes = [
     "authentication_required",
@@ -101,6 +117,9 @@ function safeErrorCode(error: unknown) {
     "spark_session_expired",
     "spark_session_unavailable",
     "daily_token_create_failed",
+    "daily_token_exp_invalid",
+    "daily_token_room_name_missing",
+    "daily_token_provider_rejected",
     "daily_room_missing",
     "daily_room_create_failed",
     "daily_room_reuse_failed",
@@ -124,6 +143,11 @@ function safeErrorCode(error: unknown) {
   return "daily_access_failed";
 }
 
+function safeErrorDetails(error: unknown) {
+  if (error instanceof SafeFunctionError) return error.details;
+  return undefined;
+}
+
 function roomNameFromSessionKey(sessionKey: string) {
   return `spark-${sessionKey.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
 }
@@ -132,9 +156,40 @@ function roomNameFromUrl(roomUrl: string) {
   try {
     const url = new URL(roomUrl);
     const segment = url.pathname.split("/").filter(Boolean).pop();
-    return segment || null;
+    const roomName = normalizeString(segment);
+    if (!roomName) return null;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(roomName)) return null;
+    return roomName;
   } catch {
     return null;
+  }
+}
+
+function safeDailyProviderMessage(bodyText: string) {
+  if (!bodyText.trim()) return "empty";
+  try {
+    const data = JSON.parse(bodyText) as Record<string, unknown>;
+    const candidate =
+      data.error ??
+      data.info ??
+      data.message ??
+      data.msg ??
+      data.type ??
+      "provider_rejected";
+    return normalizeString(String(candidate)).slice(0, 120) ||
+      "provider_rejected";
+  } catch {
+    return bodyText.replace(/\s+/g, " ").trim().slice(0, 120) || "unparseable";
+  }
+}
+
+function safeDailyProviderType(bodyText: string) {
+  try {
+    const data = JSON.parse(bodyText) as Record<string, unknown>;
+    return normalizeString(String(data.type ?? data.error_type ?? data.code ?? ""))
+      .slice(0, 80) || "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -305,13 +360,23 @@ async function createDailyMeetingToken(params: {
   dailyApiKey: string;
   roomName: string;
   participantName: string;
-  roomExpiresAtIso: string;
 }) {
-  const roomExpiresAtMs = new Date(params.roomExpiresAtIso).getTime();
-  const tokenExpiresAtMs = Math.min(
-    roomExpiresAtMs,
-    Date.now() + TOKEN_TTL_SECONDS * 1000,
-  );
+  const roomName = normalizeString(params.roomName);
+  if (!roomName) {
+    throw new SafeFunctionError("daily_token_room_name_missing", {
+      room_name_present: false,
+    });
+  }
+
+  const tokenExpiresAtMs = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  const exp = Math.floor(tokenExpiresAtMs / 1000);
+  if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000) + 60) {
+    throw new SafeFunctionError("daily_token_exp_invalid", {
+      exp_in_future: false,
+      room_name_present: true,
+      participant_name_length: params.participantName.length,
+    });
+  }
 
   const response = await fetch("https://api.daily.co/v1/meeting-tokens", {
     method: "POST",
@@ -321,9 +386,9 @@ async function createDailyMeetingToken(params: {
     },
     body: JSON.stringify({
       properties: {
-        room_name: params.roomName,
+        room_name: roomName,
         is_owner: false,
-        exp: Math.floor(tokenExpiresAtMs / 1000),
+        exp,
         user_name: params.participantName,
         enable_prejoin_ui: false,
       },
@@ -331,12 +396,27 @@ async function createDailyMeetingToken(params: {
   });
 
   if (!response.ok) {
-    throw new Error("daily_token_create_failed");
+    const bodyText = await response.text().catch(() => "");
+    throw new SafeFunctionError("daily_token_provider_rejected", {
+      daily_status: response.status,
+      daily_error_message: safeDailyProviderMessage(bodyText),
+      daily_error_type: safeDailyProviderType(bodyText),
+      room_name_present: true,
+      exp_in_future: true,
+      participant_name_length: params.participantName.length,
+    });
   }
 
   const data = await response.json() as { token?: string };
   if (!data.token) {
-    throw new Error("daily_token_create_failed");
+    throw new SafeFunctionError("daily_token_create_failed", {
+      daily_status: response.status,
+      daily_error_message: "missing token",
+      daily_error_type: "missing_token",
+      room_name_present: true,
+      exp_in_future: true,
+      participant_name_length: params.participantName.length,
+    });
   }
 
   return {
@@ -564,7 +644,6 @@ serve(async (req) => {
       dailyApiKey,
       roomName,
       participantName: safeDisplayName(callerUser.first_name),
-      roomExpiresAtIso: access.roomExpiresAt,
     });
 
     return jsonResponse({
@@ -581,9 +660,11 @@ serve(async (req) => {
       duplicate_guard_count: access.duplicateGuardCount,
     });
   } catch (error) {
+    const details = safeErrorDetails(error);
     return jsonResponse({
       error: safeErrorMessage(error),
       error_code: safeErrorCode(error),
+      ...(details ? { error_details: details } : {}),
     }, 400);
   }
 });
