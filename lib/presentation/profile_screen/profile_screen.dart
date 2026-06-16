@@ -946,6 +946,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 16),
         _buildCommunityGuidelinesCard(),
+        const SizedBox(height: 16),
+        _buildAppInfoCard(),
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
           const SizedBox(height: 16),
           _buildAndroidDiagnosticsCard(),
@@ -1236,6 +1238,79 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               );
             },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildAppInfoCard() {
+    return _SectionCard(
+      title: 'App Info',
+      child: FutureBuilder<PackageInfo>(
+        future: PackageInfo.fromPlatform(),
+        builder: (context, snapshot) {
+          final packageInfo = snapshot.data;
+          final platform = kIsWeb
+              ? 'Web'
+              : defaultTargetPlatform == TargetPlatform.android
+              ? 'Android'
+              : defaultTargetPlatform == TargetPlatform.iOS
+              ? 'iOS'
+              : defaultTargetPlatform.name;
+
+          return Column(
+            children: [
+              _SettingsRow(
+                icon: Icons.info_outline_rounded,
+                label: 'App version',
+                trailing: Text(
+                  packageInfo?.version ?? 'loading',
+                  style: GoogleFonts.dmSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.tag_rounded,
+                label: 'Build',
+                trailing: Text(
+                  packageInfo == null
+                      ? 'loading'
+                      : '+${packageInfo.buildNumber}',
+                  style: GoogleFonts.dmSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.devices_rounded,
+                label: 'Platform',
+                trailing: Text(
+                  platform,
+                  style: GoogleFonts.dmSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Divider(color: AppTheme.borderGlass, height: 1),
+              _SettingsRow(
+                icon: Icons.bug_report_outlined,
+                label: 'Diagnostics build',
+                trailing: Text(
+                  'yes',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.sparkGreen,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),

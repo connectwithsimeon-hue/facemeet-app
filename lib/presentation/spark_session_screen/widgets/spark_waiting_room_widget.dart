@@ -53,6 +53,8 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
 
   // The unique key for this specific session attempt
   String? _sessionKey;
+  String? _sessionId;
+  String? _readyColumn;
 
   // Simple 2-second polling timer — the only ready-detection mechanism
   Timer? _readyPollingTimer;
@@ -131,6 +133,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         sessionKey: _sessionKey,
       );
       _sessionKey = access.sessionKey;
+      _sessionId = access.sessionId;
       debugPrint(
         'SPARK WAITING ROOM: ✅ launching secure Spark Session — room_url exists=${access.roomUrl.isNotEmpty}, meeting_token exists=${access.meetingToken.isNotEmpty}',
       );
@@ -150,9 +153,12 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
     } catch (e) {
       debugPrint('SPARK SESSION: secure Daily access final failure — $e');
       _callLaunched = false;
+      await _clearReadyFlagAfterAccessFailure();
       await AndroidDiagnosticsService.instance.setValues({
         'spark_diag_launch_call_called': 'failed',
         'spark_diag_waiting_reason': AndroidDiagnosticsService.safeError(e),
+        'spark_diag_ready_skipped_reason': 'launch Daily access failed',
+        'spark_diag_retry_available_yes_no': 'yes',
       });
       if (mounted) {
         setState(() {
@@ -174,7 +180,6 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       _errorMessage = null;
       _roomReady = false;
       _callLaunched = false;
-      _sessionKey = null;
       _readyPollTickCount = 0;
     });
     _cancelTimers();
@@ -351,6 +356,8 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
       );
 
       _sessionKey = access.sessionKey;
+      _sessionId = access.sessionId;
+      _readyColumn = isUser1 ? 'user_1_ready' : 'user_2_ready';
       await AndroidDiagnosticsService.instance.setValues({
         'client_session_key': AndroidDiagnosticsService.shortId(
           coordinationKey,
@@ -381,7 +388,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
         });
         await SupabaseService.instance.client
             .from('spark_sessions')
-            .update({isUser1 ? 'user_1_ready' : 'user_2_ready': true})
+            .update({_readyColumn!: true})
             .eq('id', access.sessionId);
         final readyReadback = await SupabaseService.instance.client
             .from('spark_sessions')
@@ -526,11 +533,36 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
           'waiting_overlay_active': 'yes',
           'waiting_overlay_reason': 'waiting room error',
           'spark_diag_waiting_reason': 'waiting room error',
+          'spark_diag_ready_skipped_reason': 'Daily access failed before ready',
+          'spark_diag_retry_available_yes_no': 'yes',
         });
         if (_isOutOfSparksError(errMsg)) {
           _showOutOfSparksSheet();
         }
       }
+    }
+  }
+
+  Future<void> _clearReadyFlagAfterAccessFailure() async {
+    final sessionId = _sessionId;
+    final readyColumn = _readyColumn;
+    if (sessionId == null || sessionId.isEmpty || readyColumn == null) {
+      return;
+    }
+    try {
+      await SupabaseService.instance.client
+          .from('spark_sessions')
+          .update({readyColumn: false})
+          .eq('id', sessionId);
+      await AndroidDiagnosticsService.instance.setValues({
+        'spark_diag_ready_update_success': 'cleared_after_access_failure',
+        'spark_diag_ready_skipped_reason': 'Daily access failed before launch',
+      });
+    } catch (e) {
+      await AndroidDiagnosticsService.instance.setValue(
+        'spark_diag_ready_skipped_reason',
+        'ready clear failed: ${AndroidDiagnosticsService.safeError(e)}',
+      );
     }
   }
 
@@ -1314,10 +1346,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
                     child: Padding(
                       padding: const EdgeInsets.all(10),
                       child: Text(
-                        [
-                          'Spark Room Diagnostics',
-                          ...lines,
-                        ].join('\n'),
+                        ['Spark Room Diagnostics', ...lines].join('\n'),
                         maxLines: 30,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.robotoMono(

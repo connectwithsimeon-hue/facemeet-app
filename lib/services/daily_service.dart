@@ -24,7 +24,10 @@ class DailyAccessResult {
     required this.maxParticipants,
   });
 
-  factory DailyAccessResult.fromMap(Map<String, dynamic> data) {
+  factory DailyAccessResult.fromMap(
+    Map<String, dynamic> data, {
+    int? httpStatus,
+  }) {
     final matchId = (data['match_id'] as String? ?? '').trim();
     final sessionId = (data['session_id'] as String? ?? '').trim();
     final sessionKey = (data['session_key'] as String? ?? '').trim();
@@ -43,13 +46,21 @@ class DailyAccessResult {
         roomExpiresAtRaw.isEmpty ||
         tokenExpiresAtRaw.isEmpty ||
         maxParticipants <= 0) {
-      throw Exception('spark session unavailable');
+      throw DailyAccessException(
+        message: 'spark session unavailable',
+        code: 'malformed_daily_access_response',
+        httpStatus: httpStatus,
+      );
     }
 
     final roomExpiresAt = DateTime.tryParse(roomExpiresAtRaw);
     final tokenExpiresAt = DateTime.tryParse(tokenExpiresAtRaw);
     if (roomExpiresAt == null || tokenExpiresAt == null) {
-      throw Exception('spark session unavailable');
+      throw DailyAccessException(
+        message: 'spark session unavailable',
+        code: 'malformed_daily_access_response',
+        httpStatus: httpStatus,
+      );
     }
 
     return DailyAccessResult(
@@ -96,6 +107,11 @@ class DailyService {
       'spark_diag_daily_access_attempted': 'yes',
       'spark_diag_daily_access_success': 'pending',
       'spark_diag_daily_access_error_safe': 'none',
+      'spark_diag_daily_access_error_code': 'none',
+      'spark_diag_daily_access_http_status': 'pending',
+      'spark_diag_daily_room_available_yes_no': 'unknown',
+      'spark_diag_daily_token_received_yes_no': 'unknown',
+      'spark_diag_retry_available_yes_no': 'unknown',
     });
 
     try {
@@ -108,11 +124,21 @@ class DailyService {
       );
 
       final data = response.data;
+      await AndroidDiagnosticsService.instance.setValue(
+        'spark_diag_daily_access_http_status',
+        'unknown',
+      );
       if (data is Map && data['error'] != null) {
-        throw Exception(data['error'].toString());
+        throw DailyAccessException(
+          message: data['error'].toString(),
+          code: data['error_code']?.toString() ?? 'daily_access_failed',
+        );
       }
       if (data is! Map) {
-        throw Exception('spark session unavailable');
+        throw DailyAccessException(
+          message: 'spark session unavailable',
+          code: 'malformed_daily_access_response',
+        );
       }
 
       final parsed = DailyAccessResult.fromMap(Map<String, dynamic>.from(data));
@@ -125,6 +151,13 @@ class DailyService {
           parsed.roomUrl,
         ),
         'meeting_token_received': parsed.meetingToken.isNotEmpty ? 'yes' : 'no',
+        'spark_diag_daily_room_available_yes_no': parsed.roomUrl.isNotEmpty
+            ? 'yes'
+            : 'no',
+        'spark_diag_daily_token_received_yes_no': parsed.meetingToken.isNotEmpty
+            ? 'yes'
+            : 'no',
+        'spark_diag_daily_access_http_status': 'unknown',
         'spark_diag_session_id_short': AndroidDiagnosticsService.shortId(
           parsed.sessionId,
         ),
@@ -133,6 +166,8 @@ class DailyService {
         ),
         'spark_diag_daily_access_success': 'yes',
         'spark_diag_daily_access_error_safe': 'none',
+        'spark_diag_daily_access_error_code': 'none',
+        'spark_diag_retry_available_yes_no': 'no',
         'spark_diag_lock_used': data['lock_used'] == true ? 'yes' : 'no',
         'spark_diag_duplicate_session_guard':
             (data['duplicate_guard_count'] ?? '0').toString(),
@@ -142,16 +177,58 @@ class DailyService {
       );
       return parsed;
     } catch (e) {
+      final code = e is DailyAccessException ? e.code : _safeErrorCode(e);
       final message = _safeErrorMessage(e);
       await AndroidDiagnosticsService.instance.setValues({
         'daily_access_succeeded': 'no',
         'meeting_token_received': 'no',
         'spark_diag_daily_access_success': 'no',
         'spark_diag_daily_access_error_safe': message,
+        'spark_diag_daily_access_error_code': code,
+        'spark_diag_daily_access_http_status': e is DailyAccessException
+            ? (e.httpStatus?.toString() ?? 'unknown')
+            : 'unknown',
+        'spark_diag_daily_room_available_yes_no': 'unknown',
+        'spark_diag_daily_token_received_yes_no': 'no',
+        'spark_diag_retry_available_yes_no': _isTransientErrorCode(code)
+            ? 'yes'
+            : 'no',
       });
       debugPrint('SPARK DAILY ACCESS: request failed — $message');
       throw Exception(message);
     }
+  }
+
+  bool _isTransientErrorCode(String code) {
+    return const {
+      'daily_access_failed',
+      'daily_token_create_failed',
+      'daily_room_missing',
+      'daily_room_create_failed',
+      'daily_room_reuse_failed',
+      'claim_rpc_failed',
+      'daily_service_unavailable',
+      'malformed_daily_access_response',
+    }.contains(code);
+  }
+
+  String _safeErrorCode(Object error) {
+    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    const knownCodes = [
+      'daily_access_failed',
+      'daily_token_create_failed',
+      'daily_room_missing',
+      'daily_room_create_failed',
+      'daily_room_reuse_failed',
+      'claim_rpc_failed',
+      'daily_service_unavailable',
+      'malformed_daily_access_response',
+      'spark_session_unavailable',
+    ];
+    for (final code in knownCodes) {
+      if (raw.contains(code)) return code;
+    }
+    return 'daily_access_failed';
   }
 
   String _safeErrorMessage(Object error) {
@@ -174,4 +251,19 @@ class DailyService {
 
   /// Whether we're on a platform that supports the Daily Flutter SDK
   static bool get supportsNativeCall => !kIsWeb;
+}
+
+class DailyAccessException implements Exception {
+  final String message;
+  final String code;
+  final int? httpStatus;
+
+  const DailyAccessException({
+    required this.message,
+    required this.code,
+    this.httpStatus,
+  });
+
+  @override
+  String toString() => message;
 }

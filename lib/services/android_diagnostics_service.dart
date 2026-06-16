@@ -208,6 +208,9 @@ class AndroidDiagnosticsService extends ChangeNotifier {
   }
 
   static const List<String> sparkRoomEntryDiagnosticKeys = [
+    'spark_diag_app_version_build',
+    'spark_diag_platform',
+    'spark_diag_diagnostics_build',
     'spark_diag_current_user_short',
     'spark_diag_match_id_short',
     'spark_diag_session_id_short',
@@ -216,6 +219,12 @@ class AndroidDiagnosticsService extends ChangeNotifier {
     'spark_diag_daily_access_attempted',
     'spark_diag_daily_access_success',
     'spark_diag_daily_access_error_safe',
+    'spark_diag_daily_access_error_code',
+    'spark_diag_daily_room_available_yes_no',
+    'spark_diag_daily_token_received_yes_no',
+    'spark_diag_daily_access_http_status',
+    'spark_diag_ready_skipped_reason',
+    'spark_diag_retry_available_yes_no',
     'spark_diag_ready_update_attempted',
     'spark_diag_ready_update_success',
     'spark_diag_ready_update_error_safe',
@@ -244,8 +253,21 @@ class AndroidDiagnosticsService extends ChangeNotifier {
 
   Future<List<String>> buildSparkRoomEntryLines() async {
     await load();
+    final packageInfo = await PackageInfo.fromPlatform();
+    final platform = kIsWeb
+        ? 'Web'
+        : defaultTargetPlatform == TargetPlatform.android
+        ? 'Android'
+        : defaultTargetPlatform.name;
+    final merged = <String, String>{
+      ..._state,
+      'spark_diag_app_version_build':
+          '${packageInfo.version}+${packageInfo.buildNumber}',
+      'spark_diag_platform': platform,
+      'spark_diag_diagnostics_build': 'yes',
+    };
     return sparkRoomEntryDiagnosticKeys
-        .map((key) => '$key: ${_state[key] ?? 'unknown'}')
+        .map((key) => '$key: ${merged[key] ?? 'unknown'}')
         .toList();
   }
 

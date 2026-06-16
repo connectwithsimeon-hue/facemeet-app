@@ -91,8 +91,37 @@ function safeErrorMessage(error: unknown) {
   return "Daily video service is temporarily unavailable. Please try again later.";
 }
 
-function generateSessionKey() {
-  return crypto.randomUUID();
+function safeErrorCode(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  const knownCodes = [
+    "authentication_required",
+    "invalid_match",
+    "match_not_found",
+    "not_authorized_for_this_spark_session",
+    "spark_session_expired",
+    "spark_session_unavailable",
+    "daily_token_create_failed",
+    "daily_room_missing",
+    "daily_room_create_failed",
+    "daily_room_reuse_failed",
+    "claim_rpc_failed",
+    "daily_service_unavailable",
+  ];
+
+  for (const code of knownCodes) {
+    if (text.includes(code) || text.includes(code.replaceAll("_", " "))) {
+      return code;
+    }
+  }
+  if (text.includes("not authorized for this spark session")) {
+    return "not_authorized_for_this_spark_session";
+  }
+  if (text.includes("match not found")) return "match_not_found";
+  if (text.includes("invalid match")) return "invalid_match";
+  if (text.includes("spark session unavailable")) {
+    return "spark_session_unavailable";
+  }
+  return "daily_access_failed";
 }
 
 function roomNameFromSessionKey(sessionKey: string) {
@@ -351,14 +380,14 @@ async function claimCanonicalSparkSession(params: {
     },
   );
 
-  if (error) throw new Error(error.message || "spark session unavailable");
+  if (error) throw new Error("claim_rpc_failed");
   if (!data || typeof data !== "object") {
-    throw new Error("spark session unavailable");
+    throw new Error("claim_rpc_failed");
   }
 
   const claim = data as Record<string, unknown>;
   if (claim.success !== true) {
-    throw new Error("spark session unavailable");
+    throw new Error("claim_rpc_failed");
   }
 
   return {
@@ -424,7 +453,7 @@ async function ensureSessionAccess(params: {
       claim.session.id,
     );
     if (!sessionWithRoom?.daily_room_url) {
-      throw new Error("spark session unavailable");
+      throw new Error("daily_room_missing");
     }
 
     return {
@@ -449,7 +478,7 @@ async function ensureSessionAccess(params: {
     )
     .single();
 
-  if (error) throw new Error("spark session unavailable");
+  if (error) throw new Error("daily_room_reuse_failed");
 
   return {
     ...claim,
@@ -528,7 +557,7 @@ serve(async (req) => {
 
     const roomName = roomNameFromUrl(access.roomUrl);
     if (!roomName) {
-      throw new Error("daily_service_unavailable");
+      throw new Error("daily_room_reuse_failed");
     }
 
     const tokenResult = await createDailyMeetingToken({
@@ -552,6 +581,9 @@ serve(async (req) => {
       duplicate_guard_count: access.duplicateGuardCount,
     });
   } catch (error) {
-    return jsonResponse({ error: safeErrorMessage(error) }, 400);
+    return jsonResponse({
+      error: safeErrorMessage(error),
+      error_code: safeErrorCode(error),
+    }, 400);
   }
 });
