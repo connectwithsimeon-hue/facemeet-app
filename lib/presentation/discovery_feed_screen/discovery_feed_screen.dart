@@ -94,15 +94,38 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     required Map<String, dynamic> data,
   }) async {
     var nativePushSent = false;
+    final senderUserId = SupabaseService.instance.currentUserId;
+    String? senderThumbnailUrl;
+    try {
+      final senderProfile = await SupabaseService.instance
+          .getCurrentUserProfile();
+      senderThumbnailUrl =
+          (senderProfile?['thumbnail_url'] as String?)?.trim().isNotEmpty ==
+              true
+          ? senderProfile!['thumbnail_url'] as String
+          : null;
+    } catch (e) {
+      debugPrint('PUSH NOTIFICATION: sender thumbnail lookup skipped — $e');
+    }
+    final notificationData = {
+      ...data,
+      'type': type,
+      if (senderUserId != null) 'sender_user_id': senderUserId,
+      if (senderThumbnailUrl != null)
+        'sender_thumbnail_url': senderThumbnailUrl,
+      if (senderThumbnailUrl != null) 'image': senderThumbnailUrl,
+    };
     try {
       final response = await SupabaseService.instance.client.functions.invoke(
         'send_push_notification',
         body: {
           'user_id': userId,
+          'target_user_id': userId,
+          if (senderUserId != null) 'sender_user_id': senderUserId,
           'type': type,
           'title': title,
           'body': body,
-          'data': {...data, 'type': type},
+          'data': notificationData,
         },
       );
       final responseData = response.data;
@@ -168,7 +191,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       type: type,
       title: title,
       body: body,
-      data: data,
+      data: notificationData,
     );
   }
 
@@ -295,17 +318,8 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
                 'MUTUAL SPARK PUSH: send to user B success/failure=$sentToMatched',
               );
 
-              final sentToCurrent = await WebPushNotificationService.instance
-                  .sendWebPushNotification(
-                    userId: currentUid,
-                    type: 'new_match',
-                    title: "It's a Mutual Spark ⚡",
-                    body:
-                        'You both Sparked. Open FaceMeet to start your 3-minute Spark Session.',
-                    data: {'match_id': matchId, 'type': 'new_match'},
-                  );
               debugPrint(
-                'MUTUAL SPARK PUSH: send to user A success/failure=$sentToCurrent',
+                'MUTUAL SPARK PUSH: self-notification skipped for initiating user',
               );
             }
           } catch (e) {

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -219,7 +220,7 @@ class PushNotificationService {
 
   /// Step 3 — Show local notification for foreground messages.
   void handleForegroundMessages() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       debugPrint('PUSH: Foreground message received — ${message.messageId}');
       _log('PUSH: Foreground message received — ${message.messageId}');
       AndroidDiagnosticsService.instance.recordPushPayload(
@@ -250,17 +251,15 @@ class PushNotificationService {
         return;
       }
 
-      _localNotifications.show(
+      await _localNotifications.show(
         (message.messageId ?? jsonEncode(message.data)).hashCode,
         notificationTitle,
         notificationBody,
         NotificationDetails(
-          android: AndroidNotificationDetails(
-            _channel.id,
-            _channel.name,
-            importance: Importance.max,
-            priority: Priority.high,
-            channelShowBadge: true,
+          android: await _androidNotificationDetails(
+            message.data,
+            notificationTitle,
+            notificationBody,
           ),
           iOS: const DarwinNotificationDetails(),
         ),
@@ -378,6 +377,73 @@ class PushNotificationService {
       default:
         return '';
     }
+  }
+
+  Future<AndroidNotificationDetails> _androidNotificationDetails(
+    Map<String, dynamic> data,
+    String title,
+    String body,
+  ) async {
+    final imageUrl = _notificationImageUrl(data);
+    if (imageUrl != null) {
+      try {
+        final bytes = await _loadNotificationImageBytes(imageUrl);
+        if (bytes != null && bytes.isNotEmpty) {
+          final bitmap = ByteArrayAndroidBitmap(bytes);
+          return AndroidNotificationDetails(
+            _channel.id,
+            _channel.name,
+            importance: Importance.max,
+            priority: Priority.high,
+            channelShowBadge: true,
+            largeIcon: bitmap,
+            styleInformation: BigPictureStyleInformation(
+              bitmap,
+              largeIcon: bitmap,
+              contentTitle: title,
+              summaryText: body,
+            ),
+          );
+        }
+      } catch (e) {
+        _log('PUSH: notification image fallback used — ${e.runtimeType}');
+      }
+    }
+
+    return AndroidNotificationDetails(
+      _channel.id,
+      _channel.name,
+      importance: Importance.max,
+      priority: Priority.high,
+      channelShowBadge: true,
+    );
+  }
+
+  String? _notificationImageUrl(Map<String, dynamic> data) {
+    const keys = [
+      'sender_thumbnail_url',
+      'sender_avatar_url',
+      'thumbnail_url',
+      'avatar_url',
+      'image',
+      'imageUrl',
+    ];
+    for (final key in keys) {
+      final value = data[key]?.toString().trim();
+      if (value == null || value.isEmpty) continue;
+      final uri = Uri.tryParse(value);
+      if (uri != null && uri.scheme == 'https' && uri.host.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  Future<Uint8List?> _loadNotificationImageBytes(String imageUrl) async {
+    final byteData = await NetworkAssetBundle(
+      Uri.parse(imageUrl),
+    ).load(imageUrl).timeout(const Duration(seconds: 4));
+    return byteData.buffer.asUint8List();
   }
 
   Future<void> _requestAndroidRuntimeNotificationPermission() async {
