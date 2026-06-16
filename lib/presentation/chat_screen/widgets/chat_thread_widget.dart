@@ -178,6 +178,23 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     if (sessionId == null || sessionId.isEmpty) {
       return;
     }
+    if (await _isChatUnlockedMatch()) {
+      if (mounted && _showSparkRequestModal) {
+        setState(() {
+          _showSparkRequestModal = false;
+          _incomingSessionId = null;
+          _incomingRoomUrl = null;
+        });
+      }
+      await _recordSuppressedSparkPopup(
+        reason: 'handled_by_global_repeat_popup',
+        status: status,
+        endedAtExists: false,
+        chatUnlocked: true,
+        feedbackComplete: false,
+      );
+      return;
+    }
     if (status == 'ended' || (endedAt != null && endedAt.isNotEmpty)) {
       await _recordSuppressedSparkPopup(
         reason: 'session_ended',
@@ -324,6 +341,22 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       'last_session_chat_unlocked': chatUnlocked ? 'yes' : 'no',
       'last_session_feedback_complete': feedbackComplete ? 'yes' : 'no',
     });
+  }
+
+  Future<bool> _isChatUnlockedMatch() async {
+    if (_matchId.isEmpty) return false;
+    try {
+      final match = await SupabaseService.instance.client
+          .from('matches')
+          .select('status')
+          .eq('id', _matchId)
+          .maybeSingle();
+      return (match?['status'] as String? ?? '').toLowerCase() ==
+          'chat_unlocked';
+    } catch (e) {
+      debugPrint('CHAT THREAD: match status check failed — $e');
+      return false;
+    }
   }
 
   void _scrollToBottom() {

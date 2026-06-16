@@ -84,6 +84,7 @@ class MainShellScreenState extends State<MainShellScreen> {
 
   // Active banner overlay entries (stack so multiple can queue)
   final List<OverlayEntry> _bannerEntries = [];
+  final Set<String> _handledRepeatSparkSessionIds = <String>{};
 
   @override
   void initState() {
@@ -390,6 +391,14 @@ class MainShellScreenState extends State<MainShellScreen> {
     final sessionKey = (record['session_key'] as String? ?? '').trim();
 
     if (matchId.isEmpty || sessionId.isEmpty) return;
+    if (_handledRepeatSparkSessionIds.contains(sessionId)) {
+      await _recordRepeatSparkPopupSuppressed(
+        reason: 'repeat_popup_already_handled',
+        matchId: matchId,
+        sessionKey: sessionKey,
+      );
+      return;
+    }
     if (initiatorId.isEmpty || initiatorId == uid) {
       await _recordRepeatSparkPopupSuppressed(
         reason: initiatorId == uid ? 'self_initiated' : 'missing_initiator',
@@ -500,6 +509,7 @@ class MainShellScreenState extends State<MainShellScreen> {
     });
 
     if (!mounted) return;
+    _handledRepeatSparkSessionIds.add(sessionId);
     _showMatchModal(
       matchId: matchId,
       matchedUserId: matchedUserId,
