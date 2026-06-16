@@ -29,6 +29,7 @@ class SparkVideoCallWidget extends StatefulWidget {
   final String? matchId;
   final String? sessionId;
   final String? sessionKey;
+  final VoidCallback? onRemoteParticipantEverSeen;
   // Bug 5: callback to trigger spark refund when Daily.co error occurs
   final VoidCallback? onCallErrorRefund;
 
@@ -41,6 +42,7 @@ class SparkVideoCallWidget extends StatefulWidget {
     this.matchId,
     this.sessionId,
     this.sessionKey,
+    this.onRemoteParticipantEverSeen,
     this.onCallErrorRefund,
   });
 
@@ -104,6 +106,11 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
     debugPrint(
       'SPARK VIDEO CALL: initState — room URL present=${widget.roomUrl.isNotEmpty}, token_present=${widget.meetingToken.isNotEmpty}, matchId=${widget.matchId}, platform=${kIsWeb ? "web" : "native"}, screenStartTime=$_callScreenStartTime',
     );
+    AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_remote_participant_ever_seen': 'no',
+      'spark_diag_feedback_allowed': 'unknown',
+      'spark_diag_end_reason': 'call screen opened',
+    });
 
     _timerPulseCtrl = AnimationController(
       vsync: this,
@@ -347,6 +354,12 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
   void _onRemoteParticipantJoined() {
     if (_remoteParticipantPresent) return;
     _remoteParticipantPresent = true;
+    AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_remote_participant_ever_seen': 'yes',
+      'spark_diag_feedback_allowed': 'yes',
+      'spark_diag_waiting_reason': 'remote participant seen in call',
+    });
+    widget.onRemoteParticipantEverSeen?.call();
     debugPrint(
       'SPARK VIDEO CALL: remote participant joined — remoteParticipantPresent=true, callStateJoined=$_callStateJoined',
     );

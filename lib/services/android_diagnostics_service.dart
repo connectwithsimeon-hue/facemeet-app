@@ -234,6 +234,11 @@ class AndroidDiagnosticsService extends ChangeNotifier {
     'spark_diag_web_daily_join_success',
     'spark_diag_web_daily_join_error_safe',
     'spark_diag_remote_participant_count',
+    'spark_diag_remote_participant_ever_seen',
+    'spark_diag_feedback_allowed',
+    'spark_diag_end_reason',
+    'spark_diag_duplicate_session_guard',
+    'spark_diag_lock_used',
     'spark_diag_waiting_reason',
   ];
 

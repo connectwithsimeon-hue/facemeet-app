@@ -133,6 +133,9 @@ class DailyService {
         ),
         'spark_diag_daily_access_success': 'yes',
         'spark_diag_daily_access_error_safe': 'none',
+        'spark_diag_lock_used': data['lock_used'] == true ? 'yes' : 'no',
+        'spark_diag_duplicate_session_guard':
+            (data['duplicate_guard_count'] ?? '0').toString(),
       });
       debugPrint(
         'SPARK DAILY ACCESS: access granted for matchId=${parsed.matchId}, sessionId=${parsed.sessionId}, token_present=${parsed.meetingToken.isNotEmpty}',

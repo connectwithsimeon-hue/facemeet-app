@@ -36,6 +36,13 @@ type SparkSessionRow = {
   ended_at: string | null;
 };
 
+type CanonicalSessionClaim = {
+  session: SparkSessionRow;
+  createdSession: boolean;
+  duplicateGuardCount: number;
+  lockUsed: boolean;
+};
+
 type UserRow = {
   id: string;
   first_name: string | null;
@@ -309,6 +316,87 @@ async function createDailyMeetingToken(params: {
   };
 }
 
+function claimToSessionRow(matchId: string, claim: Record<string, unknown>) {
+  const sessionId = normalizeString(claim.session_id);
+  const sessionKey = normalizeString(claim.session_key);
+  const createdAt = normalizeString(claim.created_at);
+
+  if (!isUuid(sessionId) || !sessionKey || !createdAt) {
+    throw new Error("spark session unavailable");
+  }
+
+  return {
+    id: sessionId,
+    match_id: matchId,
+    daily_room_url: normalizeString(claim.daily_room_url) || null,
+    started_at: normalizeString(claim.started_at) || null,
+    created_at: createdAt,
+    status: normalizeString(claim.status) || "active",
+    initiated_by: normalizeString(claim.initiated_by) || null,
+    session_key: sessionKey,
+    ended_at: normalizeString(claim.ended_at) || null,
+  } as SparkSessionRow;
+}
+
+async function claimCanonicalSparkSession(params: {
+  adminClient: SupabaseClient;
+  matchId: string;
+  callerUserId: string;
+}) {
+  const { data, error } = await params.adminClient.rpc(
+    "claim_spark_session_for_daily_access",
+    {
+      p_match_id: params.matchId,
+      p_caller_user_id: params.callerUserId,
+    },
+  );
+
+  if (error) throw new Error(error.message || "spark session unavailable");
+  if (!data || typeof data !== "object") {
+    throw new Error("spark session unavailable");
+  }
+
+  const claim = data as Record<string, unknown>;
+  if (claim.success !== true) {
+    throw new Error("spark session unavailable");
+  }
+
+  return {
+    session: claimToSessionRow(params.matchId, claim),
+    createdSession: claim.created_session === true,
+    duplicateGuardCount: Number(claim.duplicate_guard_count ?? 0) || 0,
+    lockUsed: claim.lock_used === true,
+  } as CanonicalSessionClaim;
+}
+
+async function fetchSessionById(
+  adminClient: SupabaseClient,
+  sessionId: string,
+) {
+  const { data, error } = await adminClient
+    .from("spark_sessions")
+    .select(
+      "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
+    )
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (error) throw new Error("spark_session_lookup_failed");
+  return (data ?? null) as SparkSessionRow | null;
+}
+
+async function waitForDailyRoomUrl(
+  adminClient: SupabaseClient,
+  sessionId: string,
+) {
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const session = await fetchSessionById(adminClient, sessionId);
+    if (session?.daily_room_url) return session;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
 async function ensureSessionAccess(params: {
   adminClient: SupabaseClient;
   dailyApiKey: string;
@@ -316,122 +404,55 @@ async function ensureSessionAccess(params: {
   callerUserId: string;
   requestedSessionKey: string | null;
 }) {
-  const preferredKey = params.match.current_session_key;
+  const claim = await claimCanonicalSparkSession({
+    adminClient: params.adminClient,
+    matchId: params.match.id,
+    callerUserId: params.callerUserId,
+  });
 
-  if (preferredKey) {
-    const session = await fetchSessionByKeyWithRetry(
-      params.adminClient,
-      params.match.id,
-      preferredKey,
-    );
-    if (!session || isSessionExpired(session)) {
-      const currentKey = params.match.current_session_key;
-      if (currentKey && currentKey === preferredKey) {
-        await clearCurrentSessionKeyIfMatches(
-          params.adminClient,
-          params.match.id,
-          currentKey,
-        );
-
-        const refreshedMatch = await fetchMatch(params.adminClient, params.match.id);
-        return await ensureSessionAccess({
-          ...params,
-          match: refreshedMatch,
-          requestedSessionKey: null,
-        });
-      }
-
-      throw new Error(session ? "spark session expired" : "spark session unavailable");
-    }
-
-    if (session.daily_room_url) {
-      return {
-        session,
-        roomUrl: session.daily_room_url,
-        roomExpiresAt: getSessionExpiryIso(session),
-      };
-    }
-
-    const room = await createDailyRoom({
-      dailyApiKey: params.dailyApiKey,
-      sessionKey: session.session_key || preferredKey,
-    });
-
-    const { data, error } = await params.adminClient
-      .from("spark_sessions")
-      .update({ daily_room_url: room.roomUrl })
-      .eq("id", session.id)
-      .select(
-        "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
-      )
-      .single();
-
-    if (error) throw new Error("spark session unavailable");
-
+  if (claim.session.daily_room_url) {
     return {
-      session: data as SparkSessionRow,
-      roomUrl: room.roomUrl,
-      roomExpiresAt: room.roomExpiresAt,
+      ...claim,
+      roomUrl: claim.session.daily_room_url,
+      roomExpiresAt: getSessionExpiryIso(claim.session),
     };
   }
 
-  const keyClaim = await claimOrReuseSessionKey(params.adminClient, params.match.id);
-
-  if (!keyClaim.claimed) {
-    const reusedSession = await fetchSessionByKeyWithRetry(
+  if (!claim.createdSession) {
+    const sessionWithRoom = await waitForDailyRoomUrl(
       params.adminClient,
-      params.match.id,
-      keyClaim.sessionKey,
+      claim.session.id,
     );
-
-    if (!reusedSession) {
-      throw new Error("spark session unavailable");
-    }
-    if (isSessionExpired(reusedSession)) {
-      throw new Error("spark session expired");
-    }
-    if (!reusedSession.daily_room_url) {
+    if (!sessionWithRoom?.daily_room_url) {
       throw new Error("spark session unavailable");
     }
 
     return {
-      session: reusedSession,
-      roomUrl: reusedSession.daily_room_url,
-      roomExpiresAt: getSessionExpiryIso(reusedSession),
+      ...claim,
+      session: sessionWithRoom,
+      roomUrl: sessionWithRoom.daily_room_url,
+      roomExpiresAt: getSessionExpiryIso(sessionWithRoom),
     };
   }
 
   const room = await createDailyRoom({
     dailyApiKey: params.dailyApiKey,
-    sessionKey: keyClaim.sessionKey,
+    sessionKey: claim.session.session_key || "",
   });
 
-  const startedAt = new Date().toISOString();
   const { data, error } = await params.adminClient
     .from("spark_sessions")
-    .insert({
-      match_id: params.match.id,
-      daily_room_url: room.roomUrl,
-      started_at: startedAt,
-      initiated_by: params.callerUserId,
-      session_key: keyClaim.sessionKey,
-      status: "active",
-    })
+    .update({ daily_room_url: room.roomUrl })
+    .eq("id", claim.session.id)
     .select(
       "id,match_id,daily_room_url,started_at,created_at,status,initiated_by,session_key,ended_at",
     )
     .single();
 
-  if (error) {
-    await params.adminClient
-      .from("matches")
-      .update({ current_session_key: null })
-      .eq("id", params.match.id)
-      .eq("current_session_key", keyClaim.sessionKey);
-    throw new Error("spark session unavailable");
-  }
+  if (error) throw new Error("spark session unavailable");
 
   return {
+    ...claim,
     session: data as SparkSessionRow,
     roomUrl: room.roomUrl,
     roomExpiresAt: room.roomExpiresAt,
@@ -527,6 +548,8 @@ serve(async (req) => {
       room_expires_at: access.roomExpiresAt,
       token_expires_at: tokenResult.tokenExpiresAt,
       max_participants: MAX_PARTICIPANTS,
+      lock_used: access.lockUsed,
+      duplicate_guard_count: access.duplicateGuardCount,
     });
   } catch (error) {
     return jsonResponse({ error: safeErrorMessage(error) }, 400);

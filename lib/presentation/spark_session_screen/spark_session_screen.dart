@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../routes/app_routes.dart';
+import '../../services/android_diagnostics_service.dart';
 import '../../theme/app_theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/web_push_notification_service.dart';
@@ -49,6 +50,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
   bool _permissionDenied = false;
   Timer? _decisionStatusTimer;
   bool _chatNavigationStarted = false;
+  bool _remoteParticipantEverSeen = false;
 
   @override
   void didChangeDependencies() {
@@ -358,6 +360,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
       if (sessionKey != null) _sessionKey = sessionKey;
       if (sessionId != null) _sparkSessionId = sessionId;
       if (meetingToken != null) _dailyMeetingToken = meetingToken;
+      _remoteParticipantEverSeen = false;
       _phase = SparkSessionPhase.inCall;
     });
     // Keep screen awake for the duration of the video call
@@ -374,11 +377,49 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     _checkStatusAndProceed();
   }
 
+  void _onRemoteParticipantEverSeen() {
+    if (_remoteParticipantEverSeen) return;
+    _remoteParticipantEverSeen = true;
+    AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_remote_participant_ever_seen': 'yes',
+      'spark_diag_feedback_allowed': 'yes',
+    });
+  }
+
   /// After a call ends, check if this match is already chat_unlocked.
   /// If so, skip the rating/decision screen and go directly to chat.
   /// Only show the decision screen for first-time sessions.
   Future<void> _checkStatusAndProceed() async {
     final matchId = _matchId;
+    if (!_remoteParticipantEverSeen) {
+      await AndroidDiagnosticsService.instance.setValues({
+        'spark_diag_remote_participant_ever_seen': 'no',
+        'spark_diag_feedback_allowed': 'no',
+        'spark_diag_end_reason': 'ended before remote participant joined',
+      });
+      debugPrint(
+        'SPARK SESSION: call ended before remote participant joined — skipping feedback',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'The other person did not join yet. You can try again.',
+              style: GoogleFonts.dmSans(),
+            ),
+            backgroundColor: const Color(0xFF1A1A1F),
+          ),
+        );
+        Navigator.pop(context);
+      }
+      return;
+    }
+
+    await AndroidDiagnosticsService.instance.setValues({
+      'spark_diag_feedback_allowed': 'yes',
+      'spark_diag_end_reason': 'remote participant joined',
+    });
+
     if (matchId != null && matchId.isNotEmpty) {
       try {
         final match = await SupabaseService.instance.client
@@ -981,6 +1022,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
           sessionId: _sparkSessionId,
           sessionKey: _sessionKey,
           onCallEnded: _onCallEnded,
+          onRemoteParticipantEverSeen: _onRemoteParticipantEverSeen,
           // Bug 5: refund spark if Daily.co error occurs after sparks were deducted
           onCallErrorRefund: _refundSparkIfInitiator,
         );
