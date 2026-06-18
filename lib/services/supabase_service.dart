@@ -401,206 +401,25 @@ class SupabaseService {
     return profile?['onboarding_complete'] == true;
   }
 
-  /// Get discovery feed (all completed profiles excluding self and users already acted on by current user)
+  /// Get discovery feed ranked and filtered server-side.
   Future<List<Map<String, dynamic>>> getDiscoveryFeed() async {
     final uid = currentUserId;
     if (uid == null) return [];
     await ensureCurrentUserInitialized();
 
-    // Step 1 — Fetch current user's gender, interest, and location
-    final currentUserProfile = await client
-        .from('users')
-        .select(
-          'gender, interested_in, city, metro_area, state_region, country',
-        )
-        .eq('id', uid)
-        .maybeSingle();
-
-    final String currentGender =
-        ((currentUserProfile?['gender'] as String?) ?? '').toLowerCase().trim();
-    final String currentInterestedIn =
-        ((currentUserProfile?['interested_in'] as String?) ?? '')
-            .toLowerCase()
-            .trim();
-    final String currentCity = ((currentUserProfile?['city'] as String?) ?? '')
-        .toLowerCase()
-        .trim();
-    final String currentMetro =
-        ((currentUserProfile?['metro_area'] as String?) ?? '')
-            .toLowerCase()
-            .trim();
-    final String currentStateRegion =
-        ((currentUserProfile?['state_region'] as String?) ?? '')
-            .toLowerCase()
-            .trim();
-    final String currentCountry =
-        ((currentUserProfile?['country'] as String?) ?? '')
-            .toLowerCase()
-            .trim();
+    final response = await client.rpc(
+      'get_discovery_feed',
+      params: {'p_limit': 20},
+    );
+    final profiles = List<Map<String, dynamic>>.from(
+      response as List? ?? const [],
+    );
 
     debugPrint(
-      'DISCOVERY_FEED: current user=$uid, gender="$currentGender", interested_in="$currentInterestedIn", city="$currentCity", metro="$currentMetro"',
+      'DISCOVERY_FEED: server-ranked profiles found = ${profiles.length}',
     );
 
-    final blockedUserIds = await getBlockedUserIdsForCurrentUser();
-    debugPrint(
-      'DISCOVERY_FEED: blocked profiles excluded = ${blockedUserIds.length}',
-    );
-
-    // Step 2 — Fetch IDs already interacted with by current user
-    final interacted = await client
-        .from('interactions')
-        .select('to_user_id')
-        .eq('from_user_id', uid);
-
-    final interactedIds = (interacted as List)
-        .map((e) => e['to_user_id'] as String)
-        .toList();
-
-    debugPrint(
-      'DISCOVERY_FEED: already acted on ${interactedIds.length} users: $interactedIds',
-    );
-
-    // Step 3 — Fetch all completed profiles excluding self and interacted users
-    var query = client
-        .from('users')
-        .select()
-        .eq('onboarding_complete', true)
-        .eq('moderation_status', 'approved')
-        .eq('account_status', 'active')
-        .eq('profile_visibility_status', 'visible')
-        .neq('id', uid);
-
-    if (interactedIds.isNotEmpty) {
-      query = query.not('id', 'in', '(${interactedIds.join(',')})');
-    }
-
-    if (blockedUserIds.isNotEmpty) {
-      query = query.not('id', 'in', '(${blockedUserIds.join(',')})');
-    }
-
-    final allProfiles = List<Map<String, dynamic>>.from(
-      await query.order('last_active', ascending: false).limit(100),
-    );
-
-    // Step 4 — Apply mutual compatibility filter in Dart (case-insensitive)
-    // Both conditions must be true simultaneously (AND logic).
-    // Condition 1: other user's gender matches what current user wants.
-    // Condition 2: other user's interested_in includes current user's gender.
-    final compatible =
-        allProfiles.where((profile) {
-          final profileId = profile['id'] as String?;
-          if (profileId == null || profileId.isEmpty) {
-            debugPrint(
-              'DISCOVERY_FEED: stale profile skipped — missing public.users id',
-            );
-            return false;
-          }
-
-          final otherGender = ((profile['gender'] as String?) ?? '')
-              .toLowerCase()
-              .trim();
-          final otherInterestedIn =
-              ((profile['interested_in'] as String?) ?? '')
-                  .toLowerCase()
-                  .trim();
-
-          // Condition 1: does other user's gender match what current user wants?
-          bool condition1;
-          if (currentInterestedIn == 'everyone') {
-            condition1 = true;
-          } else if (currentInterestedIn == 'men') {
-            condition1 = otherGender == 'man';
-          } else if (currentInterestedIn == 'women') {
-            condition1 = otherGender == 'woman';
-          } else if (currentInterestedIn.isEmpty) {
-            // current user has no preference set — show nothing
-            condition1 = false;
-          } else {
-            condition1 = otherGender == currentInterestedIn;
-          }
-
-          // Condition 2: does other user want the current user's gender back?
-          // e.g. Gary is a man → only show profiles where interested_in is 'men' or 'everyone'
-          // e.g. Sandra is a woman → only show profiles where interested_in is 'women' or 'everyone'
-          bool condition2;
-          if (otherInterestedIn == 'everyone') {
-            condition2 = true;
-          } else if (currentGender == 'man') {
-            // Other user must want men
-            condition2 = otherInterestedIn == 'men';
-          } else if (currentGender == 'woman') {
-            // Other user must want women
-            condition2 = otherInterestedIn == 'women';
-          } else if (currentGender.isEmpty) {
-            // current user has no gender set — show nothing
-            condition2 = false;
-          } else {
-            // non-binary / other: other user must want 'everyone' (already handled above)
-            // or their interested_in directly matches current user's gender
-            condition2 =
-                otherInterestedIn == currentGender ||
-                otherInterestedIn == 'everyone';
-          }
-
-          final passes = condition1 && condition2;
-          debugPrint(
-            'DISCOVERY_FEED: profile=${profile['id']} '
-            'otherGender="$otherGender" otherInterestedIn="$otherInterestedIn" '
-            'c1=$condition1 c2=$condition2 passes=$passes',
-          );
-          return passes;
-        }).toList()..sort((a, b) {
-          return _locationMatchScore(
-            b,
-            currentCity: currentCity,
-            currentMetro: currentMetro,
-            currentStateRegion: currentStateRegion,
-            currentCountry: currentCountry,
-          ).compareTo(
-            _locationMatchScore(
-              a,
-              currentCity: currentCity,
-              currentMetro: currentMetro,
-              currentStateRegion: currentStateRegion,
-              currentCountry: currentCountry,
-            ),
-          );
-        });
-
-    debugPrint(
-      'DISCOVERY_FEED: compatible profiles found = ${compatible.length} '
-      '(from ${allProfiles.length} approved candidates after excluding self + interacted)',
-    );
-
-    return compatible.take(20).toList();
-  }
-
-  int _locationMatchScore(
-    Map<String, dynamic> profile, {
-    required String currentCity,
-    required String currentMetro,
-    required String currentStateRegion,
-    required String currentCountry,
-  }) {
-    final city = ((profile['city'] as String?) ?? '').toLowerCase().trim();
-    final metro = ((profile['metro_area'] as String?) ?? '')
-        .toLowerCase()
-        .trim();
-    final stateRegion = ((profile['state_region'] as String?) ?? '')
-        .toLowerCase()
-        .trim();
-    final country = ((profile['country'] as String?) ?? '')
-        .toLowerCase()
-        .trim();
-
-    if (currentMetro.isNotEmpty && metro == currentMetro) return 4;
-    if (currentCity.isNotEmpty && city == currentCity) return 3;
-    if (currentStateRegion.isNotEmpty && stateRegion == currentStateRegion) {
-      return 2;
-    }
-    if (currentCountry.isNotEmpty && country == currentCountry) return 1;
-    return 0;
+    return profiles;
   }
 
   /// Update last_active timestamp
