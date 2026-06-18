@@ -40,10 +40,16 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   String _city = '';
   String _stateRegion = '';
   String _country = 'US';
+  String _countryCode = 'US';
+  String? _regionId;
+  String? _cityPlaceId;
+  String? _areaPlaceId;
+  String? _canonicalPlaceId;
+  String _locationDisplayName = '';
   double? _latitude;
   double? _longitude;
   String _metroArea = '';
-  String _locationSource = 'manual';
+  String _locationSource = 'picker';
   bool _locationPermissionGranted = false;
 
   // Step 4 data
@@ -152,11 +158,22 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             'city': _city.trim(),
             'state_region': _stateRegion.trim(),
             'country': _country.trim().isNotEmpty ? _country.trim() : 'US',
+            'country_code': _countryCode.trim().isNotEmpty
+                ? _countryCode.trim().toUpperCase()
+                : null,
+            'region_id': _regionId,
+            'city_place_id': _cityPlaceId,
+            'area_place_id': _areaPlaceId,
+            'canonical_place_id': _canonicalPlaceId,
+            'location_display_name': _locationDisplayName.trim().isNotEmpty
+                ? _locationDisplayName.trim()
+                : null,
             'metro_area': _metroArea.trim().isNotEmpty
                 ? _metroArea.trim()
                 : null,
             'location_source': _locationSource,
             'location_permission_granted': _locationPermissionGranted,
+            'location_updated_at': DateTime.now().toIso8601String(),
           };
 
           if (_locationPermissionGranted &&
@@ -169,7 +186,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           await SupabaseService.instance.saveOnboardingStep(locationData);
           assert(() {
             debugPrint(
-              '[Onboarding] Step 3 saved — city: $_city, state_region: $_stateRegion, country: $_country, metro_area: $_metroArea, location_source: $_locationSource, location_permission_granted: $_locationPermissionGranted',
+              '[Onboarding] Step 3 saved — city: $_city, state_region: $_stateRegion, country: $_country, metro_area: $_metroArea, location_source: $_locationSource, canonical_place_selected=${_canonicalPlaceId != null}, location_permission_granted: $_locationPermissionGranted',
             );
             return true;
           }());
@@ -291,7 +308,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       case 2:
         return _city.trim().isNotEmpty &&
             _stateRegion.trim().isNotEmpty &&
-            _country.trim().isNotEmpty;
+            _country.trim().isNotEmpty &&
+            _canonicalPlaceId != null;
       case 3:
         return _profileVideoUrl != null;
       default:
@@ -428,6 +446,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           city: _city,
           stateRegion: _stateRegion,
           country: _country,
+          countryCode: _countryCode,
+          regionId: _regionId,
+          cityPlaceId: _cityPlaceId,
+          areaPlaceId: _areaPlaceId,
+          canonicalPlaceId: _canonicalPlaceId,
+          locationDisplayName: _locationDisplayName,
           metroArea: _metroArea,
           latitude: _latitude,
           longitude: _longitude,
@@ -437,6 +461,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             _city = location.city;
             _stateRegion = location.stateRegion;
             _country = location.country;
+            _countryCode = location.countryCode;
+            _regionId = location.regionId;
+            _cityPlaceId = location.cityPlaceId;
+            _areaPlaceId = location.areaPlaceId;
+            _canonicalPlaceId = location.canonicalPlaceId;
+            _locationDisplayName = location.locationDisplayName;
             _metroArea = location.metroArea ?? '';
             _latitude = location.latitude;
             _longitude = location.longitude;

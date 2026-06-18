@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../models/location_models.dart';
 import 'content_filter_service.dart';
 
 class SparkSessionEntryEligibility {
@@ -420,6 +421,58 @@ class SupabaseService {
     );
 
     return profiles;
+  }
+
+  Future<List<LocationCountry>> getLocationCountries() async {
+    final rows = await client
+        .from('location_countries')
+        .select('code, name')
+        .eq('enabled', true)
+        .order('sort_order')
+        .order('name');
+    return List<Map<String, dynamic>>.from(
+      rows as List? ?? const [],
+    ).map(LocationCountry.fromMap).where((country) {
+      return country.code.isNotEmpty && country.name.isNotEmpty;
+    }).toList();
+  }
+
+  Future<List<LocationRegion>> getLocationRegions(String countryCode) async {
+    if (countryCode.trim().isEmpty) return const [];
+    final rows = await client
+        .from('location_regions')
+        .select('id, country_code, region_code, name')
+        .eq('enabled', true)
+        .eq('country_code', countryCode.toUpperCase())
+        .order('sort_order')
+        .order('name');
+    return List<Map<String, dynamic>>.from(
+      rows as List? ?? const [],
+    ).map(LocationRegion.fromMap).where((region) {
+      return region.id.isNotEmpty && region.name.isNotEmpty;
+    }).toList();
+  }
+
+  Future<List<LocationPlace>> searchLocations({
+    required String query,
+    String? countryCode,
+    String? regionId,
+    int limit = 20,
+  }) async {
+    final response = await client.rpc(
+      'search_locations',
+      params: {
+        'p_query': query,
+        'p_country_code': countryCode,
+        'p_region_id': regionId,
+        'p_limit': limit,
+      },
+    );
+    return List<Map<String, dynamic>>.from(
+      response as List? ?? const [],
+    ).map(LocationPlace.fromMap).where((place) {
+      return place.id.isNotEmpty && place.displayName.isNotEmpty;
+    }).toList();
   }
 
   /// Update last_active timestamp

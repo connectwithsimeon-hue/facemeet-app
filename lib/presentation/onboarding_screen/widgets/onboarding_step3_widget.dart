@@ -1,15 +1,25 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../../theme/app_theme.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import '../../../models/location_models.dart';
 import '../../../services/android_diagnostics_service.dart';
 import '../../../services/metro_location_service.dart';
+import '../../../services/supabase_service.dart';
+import '../../../theme/app_theme.dart';
 
 class OnboardingLocationData {
   final String city;
   final String stateRegion;
   final String country;
+  final String countryCode;
+  final String? regionId;
+  final String? cityPlaceId;
+  final String? areaPlaceId;
+  final String? canonicalPlaceId;
+  final String locationDisplayName;
   final String? metroArea;
   final double? latitude;
   final double? longitude;
@@ -20,6 +30,12 @@ class OnboardingLocationData {
     required this.city,
     required this.stateRegion,
     required this.country,
+    required this.countryCode,
+    required this.regionId,
+    required this.cityPlaceId,
+    required this.areaPlaceId,
+    required this.canonicalPlaceId,
+    required this.locationDisplayName,
     required this.metroArea,
     required this.latitude,
     required this.longitude,
@@ -32,6 +48,12 @@ class OnboardingStep3Widget extends StatefulWidget {
   final String city;
   final String stateRegion;
   final String country;
+  final String countryCode;
+  final String? regionId;
+  final String? cityPlaceId;
+  final String? areaPlaceId;
+  final String? canonicalPlaceId;
+  final String locationDisplayName;
   final String metroArea;
   final double? latitude;
   final double? longitude;
@@ -44,6 +66,12 @@ class OnboardingStep3Widget extends StatefulWidget {
     required this.city,
     required this.stateRegion,
     required this.country,
+    required this.countryCode,
+    required this.regionId,
+    required this.cityPlaceId,
+    required this.areaPlaceId,
+    required this.canonicalPlaceId,
+    required this.locationDisplayName,
     required this.metroArea,
     required this.latitude,
     required this.longitude,
@@ -57,76 +85,157 @@ class OnboardingStep3Widget extends StatefulWidget {
 }
 
 class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
-  static const _noMetroValue = '__no_metro__';
-  static const _manualMetroValue = '__manual_metro__';
+  final TextEditingController _searchController = TextEditingController();
 
-  late final TextEditingController _cityController;
-  late final TextEditingController _stateController;
-  late final TextEditingController _countryController;
-  late final TextEditingController _metroController;
+  List<LocationCountry> _countries = const [];
+  List<LocationRegion> _regions = const [];
+  List<LocationPlace> _places = const [];
+  LocationCountry? _selectedCountry;
+  LocationRegion? _selectedRegion;
+  LocationPlace? _selectedPlace;
 
+  bool _loadingCountries = true;
+  bool _loadingRegions = false;
+  bool _searchingPlaces = false;
   bool _isLocating = false;
   bool _locationDenied = false;
   bool _locationDetected = false;
-  bool _manualMetro = false;
-  String? _selectedMetro;
+  String? _loadError;
+  int _searchGeneration = 0;
+
   double? _latitude;
   double? _longitude;
-  String _locationSource = 'manual';
+  String _locationSource = 'picker';
   bool _locationPermissionGranted = false;
 
   @override
   void initState() {
     super.initState();
-    _cityController = TextEditingController(text: widget.city);
-    _stateController = TextEditingController(text: widget.stateRegion);
-    _countryController = TextEditingController(
-      text: widget.country.isNotEmpty ? widget.country : 'US',
-    );
-    _metroController = TextEditingController(text: widget.metroArea);
     _latitude = widget.latitude;
     _longitude = widget.longitude;
-    _locationSource = widget.locationSource;
+    _locationSource = widget.locationSource == 'manual'
+        ? 'picker'
+        : widget.locationSource;
     _locationPermissionGranted = widget.locationPermissionGranted;
-
-    if (widget.metroArea.isNotEmpty &&
-        MetroLocationService.metroNames.contains(widget.metroArea)) {
-      _selectedMetro = widget.metroArea;
-    } else if (widget.metroArea.isNotEmpty) {
-      _selectedMetro = _manualMetroValue;
-      _manualMetro = true;
-    }
+    _loadCountries();
   }
 
   @override
   void dispose() {
-    _cityController.dispose();
-    _stateController.dispose();
-    _countryController.dispose();
-    _metroController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  void _emitLocation({String source = 'manual', bool? permissionGranted}) {
-    _locationSource = source;
-    _locationPermissionGranted =
-        permissionGranted ?? _locationPermissionGranted;
-    widget.onLocationChanged(
-      OnboardingLocationData(
-        city: _cityController.text.trim(),
-        stateRegion: _stateController.text.trim(),
-        country: _countryController.text.trim().isNotEmpty
-            ? _countryController.text.trim()
-            : 'US',
-        metroArea: _metroController.text.trim().isNotEmpty
-            ? _metroController.text.trim()
-            : null,
-        latitude: _locationPermissionGranted ? _latitude : null,
-        longitude: _locationPermissionGranted ? _longitude : null,
-        locationSource: _locationSource,
-        locationPermissionGranted: _locationPermissionGranted,
-      ),
-    );
+  Future<void> _loadCountries() async {
+    setState(() {
+      _loadingCountries = true;
+      _loadError = null;
+    });
+
+    try {
+      final countries = await SupabaseService.instance.getLocationCountries();
+      if (!mounted) return;
+      final initialCountryCode = widget.countryCode.isNotEmpty
+          ? widget.countryCode
+          : widget.country;
+      final selected = countries.where((country) {
+        return country.code.toUpperCase() == initialCountryCode.toUpperCase();
+      }).firstOrNull;
+
+      setState(() {
+        _countries = countries;
+        _selectedCountry =
+            selected ??
+            countries.where((country) => country.code == 'US').firstOrNull ??
+            countries.firstOrNull;
+        _loadingCountries = false;
+      });
+
+      if (_selectedCountry != null) {
+        await _loadRegions(
+          _selectedCountry!.code,
+          initialRegionId: widget.regionId,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCountries = false;
+        _loadError = 'Could not load locations. Please try again.';
+      });
+    }
+  }
+
+  Future<void> _loadRegions(
+    String countryCode, {
+    String? initialRegionId,
+  }) async {
+    setState(() {
+      _loadingRegions = true;
+      _regions = const [];
+      _selectedRegion = null;
+      _places = const [];
+      _selectedPlace = null;
+    });
+
+    try {
+      final regions = await SupabaseService.instance.getLocationRegions(
+        countryCode,
+      );
+      if (!mounted) return;
+      final selected = regions.where((region) {
+        return region.id == initialRegionId ||
+            region.name.toLowerCase() == widget.stateRegion.toLowerCase();
+      }).firstOrNull;
+
+      setState(() {
+        _regions = regions;
+        _selectedRegion = selected;
+        _loadingRegions = false;
+      });
+
+      if (widget.canonicalPlaceId != null && widget.city.isNotEmpty) {
+        _searchController.text = widget.city;
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingRegions = false;
+        _loadError = 'Could not load regions. Please try again.';
+      });
+    }
+  }
+
+  Future<void> _searchPlaces(String query) async {
+    final country = _selectedCountry;
+    final generation = ++_searchGeneration;
+    if (country == null) return;
+
+    setState(() {
+      _searchingPlaces = true;
+      _places = const [];
+      _loadError = null;
+    });
+
+    try {
+      final places = await SupabaseService.instance.searchLocations(
+        query: query.trim(),
+        countryCode: country.code,
+        regionId: _selectedRegion?.id,
+        limit: 20,
+      );
+      if (!mounted || generation != _searchGeneration) return;
+      setState(() {
+        _places = places;
+        _searchingPlaces = false;
+      });
+    } catch (e) {
+      if (!mounted || generation != _searchGeneration) return;
+      setState(() {
+        _searchingPlaces = false;
+        _loadError = 'Location search failed. Try another city or area.';
+      });
+    }
   }
 
   Future<void> _requestLocation() async {
@@ -187,20 +296,14 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
         _locationDetected = true;
         _latitude = position.latitude;
         _longitude = position.longitude;
-        _locationSource = 'detected';
+        _locationSource = 'gps';
         _locationPermissionGranted = true;
-
-        if (metro != null) {
-          _cityController.text = metro.name;
-          _stateController.text = metro.stateRegion;
-          _countryController.text = metro.country;
-          _metroController.text = metro.name;
-          _selectedMetro = metro.name;
-          _manualMetro = false;
-        }
       });
 
-      _emitLocation(source: 'detected', permissionGranted: true);
+      if (metro != null) {
+        await _selectDetectedMetro(metro);
+      }
+
       await AndroidDiagnosticsService.instance.setValues({
         'location_permission_status': permission.name,
         'location_updated_yes_no': 'yes',
@@ -214,32 +317,89 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
     }
   }
 
+  Future<void> _selectDetectedMetro(MetroArea metro) async {
+    final country = _countries.where((item) {
+      return item.code.toUpperCase() == metro.country.toUpperCase() ||
+          item.name.toLowerCase() == metro.country.toLowerCase();
+    }).firstOrNull;
+    if (country == null) return;
+
+    setState(() => _selectedCountry = country);
+    await _loadRegions(country.code);
+    final region = _regions.where((item) {
+      return item.name.toLowerCase() == metro.stateRegion.toLowerCase() ||
+          (item.regionCode ?? '').toLowerCase() ==
+              metro.stateRegion.toLowerCase();
+    }).firstOrNull;
+    if (region != null) {
+      setState(() => _selectedRegion = region);
+    }
+
+    final matches = await SupabaseService.instance.searchLocations(
+      query: metro.name,
+      countryCode: country.code,
+      regionId: region?.id,
+      limit: 5,
+    );
+    if (!mounted || matches.isEmpty) return;
+    _selectPlace(matches.first, source: 'gps');
+  }
+
   void _handleDenied() {
     if (!mounted) return;
     setState(() {
       _locationDenied = true;
       _isLocating = false;
-      _locationSource = 'manual';
+      _locationSource = 'picker';
       _locationPermissionGranted = false;
       _latitude = null;
       _longitude = null;
     });
-    _emitLocation(source: 'manual', permissionGranted: false);
+    _emitLocation();
   }
 
-  void _handleMetroChanged(String? value) {
+  void _selectPlace(LocationPlace place, {String source = 'picker'}) {
     setState(() {
-      _selectedMetro = value == _noMetroValue ? null : value;
-      _manualMetro = value == _manualMetroValue;
-      if (value == null || value == _noMetroValue) {
-        _metroController.clear();
-      } else if (value != _manualMetroValue) {
-        _metroController.text = value;
-      } else {
-        _metroController.clear();
+      _selectedPlace = place;
+      _searchController.text = place.displayName;
+      _places = const [];
+      _locationSource = source;
+      if (!_locationPermissionGranted ||
+          _latitude == null ||
+          _longitude == null) {
+        _latitude = place.latitude;
+        _longitude = place.longitude;
       }
     });
     _emitLocation();
+  }
+
+  void _emitLocation() {
+    final country = _selectedCountry;
+    final region = _selectedRegion;
+    final place = _selectedPlace;
+    widget.onLocationChanged(
+      OnboardingLocationData(
+        city: place?.cityName ?? '',
+        stateRegion: region?.name ?? place?.regionName ?? '',
+        country: country?.code ?? place?.countryCode ?? 'US',
+        countryCode: country?.code ?? place?.countryCode ?? 'US',
+        regionId: region?.id ?? place?.regionId,
+        cityPlaceId: place == null
+            ? null
+            : place.isArea
+            ? place.parentPlaceId
+            : place.id,
+        areaPlaceId: place?.isArea == true ? place?.id : null,
+        canonicalPlaceId: place?.id,
+        locationDisplayName: place?.displayName ?? '',
+        metroArea: place?.areaName ?? place?.cityName,
+        latitude: _latitude,
+        longitude: _longitude,
+        locationSource: _locationSource,
+        locationPermissionGranted: _locationPermissionGranted,
+      ),
+    );
   }
 
   @override
@@ -259,7 +419,7 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Tell us where you are so we can show people near you first.',
+            'Choose a real location so FaceMeet can show nearby people first.',
             style: GoogleFonts.dmSans(
               fontSize: 14,
               color: AppTheme.textSecondary,
@@ -268,7 +428,7 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
           ),
           const SizedBox(height: 6),
           Text(
-            'FaceMeet is open for profile uploads everywhere.',
+            'GPS is optional. Your saved location comes from the picker.',
             style: GoogleFonts.dmSans(
               fontSize: 13,
               color: AppTheme.primary,
@@ -276,116 +436,87 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
             ),
           ),
           const SizedBox(height: 28),
-
-          GestureDetector(
+          _LocationActionButton(
+            isLoading: _isLocating,
             onTap: _isLocating ? null : _requestLocation,
-            child: Container(
-              height: 56,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0x33FF4458), Color(0x1AFF4458)],
-                ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0x66FF4458), width: 1),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (_isLocating)
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: AppTheme.primary,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  else
-                    const Icon(
-                      Icons.my_location_rounded,
-                      color: AppTheme.primary,
-                      size: 22,
-                    ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _isLocating
-                        ? 'Detecting your location...'
-                        : 'Use My Location',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
           const SizedBox(height: 16),
-
           if (_locationDenied) ...[
             _InfoBanner(
               icon: Icons.info_outline_rounded,
               color: const Color(0xFFF59E0B),
               text:
-                  'No problem. Enter your city manually and you can continue.',
+                  'No problem. Pick your country, region, and city below to continue.',
             ),
             const SizedBox(height: 16),
           ],
-
           if (_locationDetected) ...[
             _InfoBanner(
               icon: Icons.check_circle_rounded,
               color: const Color(0xFF22C55E),
-              text: _metroController.text.trim().isNotEmpty
-                  ? 'Location detected. You can edit it below.'
-                  : 'Location detected. Add your city so nearby people can find you.',
+              text:
+                  'Location permission is on. Confirm your city or area below.',
             ),
             const SizedBox(height: 16),
           ],
-
-          _LocationTextField(
-            controller: _cityController,
-            label: 'City',
-            hint: 'Dallas, Chicago, London...',
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _emitLocation(),
-          ),
-          const SizedBox(height: 14),
-          _LocationTextField(
-            controller: _stateController,
-            label: 'State / Region',
-            hint: 'Texas, Illinois, Greater London...',
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _emitLocation(),
-          ),
-          const SizedBox(height: 14),
-          _LocationTextField(
-            controller: _countryController,
-            label: 'Country',
-            hint: 'US',
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _emitLocation(),
-          ),
-          const SizedBox(height: 14),
-
-          _MetroDropdown(
-            selectedMetro: _selectedMetro,
-            onChanged: _handleMetroChanged,
-          ),
-          if (_manualMetro) ...[
-            const SizedBox(height: 12),
-            _LocationTextField(
-              controller: _metroController,
-              label: 'Metro Area',
-              hint: 'Optional, if different from your city',
-              textInputAction: TextInputAction.done,
-              onChanged: (_) => _emitLocation(),
+          if (_loadError != null) ...[
+            _InfoBanner(
+              icon: Icons.error_outline_rounded,
+              color: const Color(0xFFF59E0B),
+              text: _loadError!,
             ),
+            const SizedBox(height: 16),
           ],
+          _CountryDropdown(
+            countries: _countries,
+            selectedCountry: _selectedCountry,
+            isLoading: _loadingCountries,
+            onChanged: (country) async {
+              if (country == null) return;
+              setState(() {
+                _selectedCountry = country;
+                _selectedRegion = null;
+                _selectedPlace = null;
+                _searchController.clear();
+                _locationSource = 'picker';
+                _locationPermissionGranted = false;
+              });
+              _emitLocation();
+              await _loadRegions(country.code);
+            },
+          ),
+          const SizedBox(height: 14),
+          _RegionDropdown(
+            regions: _regions,
+            selectedRegion: _selectedRegion,
+            isLoading: _loadingRegions,
+            onChanged: (region) {
+              setState(() {
+                _selectedRegion = region;
+                _selectedPlace = null;
+                _searchController.clear();
+                _places = const [];
+                _locationSource = 'picker';
+                _locationPermissionGranted = false;
+              });
+              _emitLocation();
+            },
+          ),
+          const SizedBox(height: 14),
+          _PlaceSearchField(
+            controller: _searchController,
+            enabled: _selectedCountry != null,
+            isSearching: _searchingPlaces,
+            onChanged: _searchPlaces,
+          ),
+          const SizedBox(height: 10),
+          if (_places.isNotEmpty)
+            _PlaceResultsList(places: _places, onSelected: _selectPlace)
+          else if (_selectedPlace != null)
+            _SelectedPlaceCard(place: _selectedPlace!),
           const SizedBox(height: 14),
           Text(
-            'Your exact location is only saved when you choose Use My Location.',
+            'Typing is only used to search. FaceMeet saves the selected location record.',
             style: GoogleFonts.dmSans(
               fontSize: 12,
               color: AppTheme.textMuted,
@@ -394,6 +525,291 @@ class _OnboardingStep3WidgetState extends State<OnboardingStep3Widget> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LocationActionButton extends StatelessWidget {
+  final bool isLoading;
+  final VoidCallback? onTap;
+
+  const _LocationActionButton({required this.isLoading, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0x33FF4458), Color(0x1AFF4458)],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0x66FF4458), width: 1),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (isLoading)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: AppTheme.primary,
+                  strokeWidth: 2,
+                ),
+              )
+            else
+              const Icon(
+                Icons.my_location_rounded,
+                color: AppTheme.primary,
+                size: 22,
+              ),
+            const SizedBox(width: 10),
+            Text(
+              isLoading ? 'Detecting your location...' : 'Use My Location',
+              style: GoogleFonts.dmSans(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CountryDropdown extends StatelessWidget {
+  final List<LocationCountry> countries;
+  final LocationCountry? selectedCountry;
+  final bool isLoading;
+  final ValueChanged<LocationCountry?> onChanged;
+
+  const _CountryDropdown({
+    required this.countries,
+    required this.selectedCountry,
+    required this.isLoading,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _PickerShell(
+      label: 'Country',
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<LocationCountry>(
+          value: countries.contains(selectedCountry) ? selectedCountry : null,
+          isExpanded: true,
+          dropdownColor: AppTheme.backgroundDark,
+          hint: Text(
+            isLoading ? 'Loading countries...' : 'Choose country',
+            style: GoogleFonts.dmSans(color: AppTheme.textHint),
+          ),
+          items: countries.map((country) {
+            return DropdownMenuItem<LocationCountry>(
+              value: country,
+              child: Text(
+                country.name,
+                style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
+              ),
+            );
+          }).toList(),
+          onChanged: isLoading ? null : onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+class _RegionDropdown extends StatelessWidget {
+  final List<LocationRegion> regions;
+  final LocationRegion? selectedRegion;
+  final bool isLoading;
+  final ValueChanged<LocationRegion?> onChanged;
+
+  const _RegionDropdown({
+    required this.regions,
+    required this.selectedRegion,
+    required this.isLoading,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _PickerShell(
+      label: 'State / Region',
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<LocationRegion>(
+          value: regions.contains(selectedRegion) ? selectedRegion : null,
+          isExpanded: true,
+          dropdownColor: AppTheme.backgroundDark,
+          hint: Text(
+            isLoading ? 'Loading regions...' : 'Choose state or region',
+            style: GoogleFonts.dmSans(color: AppTheme.textHint),
+          ),
+          items: regions.map((region) {
+            return DropdownMenuItem<LocationRegion>(
+              value: region,
+              child: Text(
+                region.name,
+                style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
+              ),
+            );
+          }).toList(),
+          onChanged: isLoading ? null : onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaceSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final bool enabled;
+  final bool isSearching;
+  final ValueChanged<String> onChanged;
+
+  const _PlaceSearchField({
+    required this.controller,
+    required this.enabled,
+    required this.isSearching,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _PickerShell(
+      label: 'City or Area',
+      child: TextField(
+        controller: controller,
+        enabled: enabled,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          hintText: enabled
+              ? 'Search Lagos, VI, Phoenix...'
+              : 'Choose country first',
+          hintStyle: GoogleFonts.dmSans(color: AppTheme.textHint),
+          suffixIcon: isSearching
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : const Icon(Icons.search_rounded, color: AppTheme.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _PickerShell extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _PickerShell({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 56),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceGlass,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.borderGlass, width: 1),
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PlaceResultsList extends StatelessWidget {
+  final List<LocationPlace> places;
+  final ValueChanged<LocationPlace> onSelected;
+
+  const _PlaceResultsList({required this.places, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        children: places.take(8).map((place) {
+          return ListTile(
+            dense: true,
+            leading: Icon(
+              place.isArea
+                  ? Icons.location_city_rounded
+                  : Icons.location_on_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            title: Text(
+              place.displayName,
+              style: GoogleFonts.dmSans(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text(
+              place.isArea ? 'Area / neighborhood' : 'City',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.textMuted,
+                fontSize: 12,
+              ),
+            ),
+            onTap: () => onSelected(place),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _SelectedPlaceCard extends StatelessWidget {
+  final LocationPlace place;
+
+  const _SelectedPlaceCard({required this.place});
+
+  @override
+  Widget build(BuildContext context) {
+    return _InfoBanner(
+      icon: Icons.check_circle_rounded,
+      color: const Color(0xFF22C55E),
+      text: 'Selected: ${place.displayName}',
     );
   }
 }
@@ -430,150 +846,6 @@ class _InfoBanner extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _LocationTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final String hint;
-  final TextInputAction textInputAction;
-  final ValueChanged<String> onChanged;
-
-  const _LocationTextField({
-    required this.controller,
-    required this.label,
-    required this.hint,
-    required this.textInputAction,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.dmSans(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              textInputAction: textInputAction,
-              style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: GoogleFonts.dmSans(color: AppTheme.textHint),
-                filled: true,
-                fillColor: AppTheme.surfaceGlass,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 16,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: AppTheme.borderGlass),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: AppTheme.primary),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MetroDropdown extends StatelessWidget {
-  final String? selectedMetro;
-  final ValueChanged<String?> onChanged;
-
-  const _MetroDropdown({required this.selectedMetro, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = <DropdownMenuItem<String?>>[
-      DropdownMenuItem<String?>(
-        value: _OnboardingStep3WidgetState._noMetroValue,
-        child: Text(
-          'No metro / not sure',
-          style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
-        ),
-      ),
-      ...MetroLocationService.metroNames.map((metro) {
-        return DropdownMenuItem<String?>(value: metro, child: Text(metro));
-      }),
-      DropdownMenuItem<String?>(
-        value: _OnboardingStep3WidgetState._manualMetroValue,
-        child: Text(
-          'My city is not listed',
-          style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
-        ),
-      ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Metro Area (optional)',
-          style: GoogleFonts.dmSans(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceGlass,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.borderGlass, width: 1),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String?>(
-                  value: selectedMetro,
-                  hint: Text(
-                    'Choose a metro or enter your own',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 15,
-                      color: AppTheme.textHint,
-                    ),
-                  ),
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF1A1A1F),
-                  icon: const Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: AppTheme.textMuted,
-                  ),
-                  style: GoogleFonts.dmSans(fontSize: 15, color: Colors.white),
-                  items: items,
-                  onChanged: onChanged,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
