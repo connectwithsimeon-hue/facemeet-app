@@ -22,6 +22,7 @@ class _EventsScreenState extends State<EventsScreen> {
   List<Map<String, dynamic>> _events = const [];
   Map<String, String> _statuses = const {};
   Map<String, Map<String, dynamic>> _eventAccessDetailsByEventId = const {};
+  Map<String, Map<String, dynamic>> _entryTicketsByEventId = const {};
   Map<String, Map<String, dynamic>> _eventPairingPreferencesByEventId =
       const {};
   bool _hasChatUnlockedMatch = false;
@@ -59,6 +60,20 @@ class _EventsScreenState extends State<EventsScreen> {
         final eventId = row['event_id']?.toString();
         if (eventId == null || eventId.isEmpty) continue;
         eventAccessDetailsByEventId[eventId] = Map<String, dynamic>.from(row);
+      }
+      final entryTicketResponses = await Future.wait(
+        events.map((event) async {
+          final eventId = event['id']?.toString();
+          if (eventId == null || eventId.isEmpty) return null;
+          if (statuses[eventId] != 'approved') return null;
+          return await SupabaseService.instance.getEventTicketForUser(eventId);
+        }),
+      );
+      final entryTicketsByEventId = <String, Map<String, dynamic>>{};
+      for (final row in entryTicketResponses) {
+        final eventId = row?['event_id']?.toString();
+        if (eventId == null || eventId.isEmpty) continue;
+        entryTicketsByEventId[eventId] = Map<String, dynamic>.from(row!);
       }
       final pairingPreferenceResponses = await Future.wait(
         events.map((event) async {
@@ -107,6 +122,7 @@ class _EventsScreenState extends State<EventsScreen> {
         _events = events;
         _statuses = statuses;
         _eventAccessDetailsByEventId = eventAccessDetailsByEventId;
+        _entryTicketsByEventId = entryTicketsByEventId;
         _eventPairingPreferencesByEventId = eventPairingPreferencesByEventId;
         _hasChatUnlockedMatch = hasChatUnlockedMatch;
         _loading = false;
@@ -482,6 +498,7 @@ class _EventsScreenState extends State<EventsScreen> {
     final accessNote = event['access_note']?.toString().trim() ?? '';
     final accessMode = _normalizedAccessMode(event['access_mode']?.toString());
     final accessDetails = _eventAccessDetailsByEventId[eventId];
+    final entryTicket = _entryTicketsByEventId[eventId];
     final ticketState = accessDetails?['ticket_state']?.toString();
     final pairingPreferences =
         _eventPairingPreferencesByEventId[eventId] ??
@@ -630,6 +647,14 @@ class _EventsScreenState extends State<EventsScreen> {
                     ],
                   ],
                 ),
+                ...switch (_buildEntryTicketBlock(
+                  event: event,
+                  status: status,
+                  ticket: entryTicket,
+                )) {
+                  final Widget block => [const SizedBox(height: 14), block],
+                  null => const <Widget>[],
+                },
                 ...switch (_buildEventAccessTicketBlock(
                   ticketState: ticketState,
                   accessDetails: accessDetails,
@@ -863,6 +888,246 @@ class _EventsScreenState extends State<EventsScreen> {
       default:
         return null;
     }
+  }
+
+  Widget? _buildEntryTicketBlock({
+    required Map<String, dynamic> event,
+    required String? status,
+    required Map<String, dynamic>? ticket,
+  }) {
+    if (status != 'approved') return null;
+
+    final code = ticket?['ticket_code']?.toString().trim() ?? '';
+    final ticketStatus = ticket?['ticket_status']?.toString() ?? 'pending';
+    final available = ticket?['ticket_available'] == true && code.isNotEmpty;
+    final checkedIn = ticketStatus == 'checked_in';
+    final attendeeName = ticket?['attendee_name']?.toString().trim() ?? '';
+    final eventTitle =
+        ticket?['event_title']?.toString().trim().isNotEmpty == true
+        ? ticket!['event_title'].toString()
+        : event['title']?.toString() ?? 'FaceMeet Event';
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF101415),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: available ? const Color(0x443CD7A4) : const Color(0x22FFFFFF),
+        ),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0x1F3CD7A4),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.confirmation_number_rounded,
+                  color: Color(0xFF3CD7A4),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ENTRY TICKET',
+                      style: GoogleFonts.dmSans(
+                        color: const Color(0xFF3CD7A4),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _entryTicketStatusLabel(ticketStatus, available),
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (checkedIn)
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: AppTheme.sparkGreen,
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            eventTitle,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontSize: 15,
+              height: 1.35,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (attendeeName.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              attendeeName,
+              style: GoogleFonts.dmSans(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          if (available)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTicketCodeVisual(code),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Show this at check-in.',
+                        style: GoogleFonts.dmSans(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        'Your QR-style ticket uses a private FaceMeet code. Staff can also enter the code manually.',
+                        style: GoogleFonts.dmSans(
+                          color: const Color(0xFFC9F4DF),
+                          fontSize: 11.5,
+                          height: 1.45,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0x14000000),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0x223CD7A4)),
+                        ),
+                        child: Text(
+                          code,
+                          style: GoogleFonts.dmMono(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else
+            Text(
+              'Your entry ticket will appear here after your invite is approved.',
+              style: GoogleFonts.dmSans(
+                color: const Color(0xFFF3D3CD),
+                fontSize: 12,
+                height: 1.55,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _entryTicketStatusLabel(String status, bool available) {
+    if (!available) return 'Not Active Yet';
+    switch (status) {
+      case 'checked_in':
+        return 'Checked In';
+      case 'active':
+        return 'Active Ticket';
+      default:
+        return 'Ticket Pending';
+    }
+  }
+
+  Widget _buildTicketCodeVisual(String code) {
+    const cells = 9;
+    return Container(
+      width: 92,
+      height: 92,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          for (var row = 0; row < cells; row++)
+            Expanded(
+              child: Row(
+                children: [
+                  for (var col = 0; col < cells; col++)
+                    Expanded(
+                      child: Container(
+                        margin: const EdgeInsets.all(1),
+                        decoration: BoxDecoration(
+                          color: _ticketVisualCellEnabled(code, row, col)
+                              ? const Color(0xFF111111)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(1.5),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  bool _ticketVisualCellEnabled(String code, int row, int col) {
+    final inTopLeft = row < 3 && col < 3;
+    final inTopRight = row < 3 && col > 5;
+    final inBottomLeft = row > 5 && col < 3;
+    if (inTopLeft || inTopRight || inBottomLeft) {
+      return row == 0 || col == 0 || row == 2 || col == 2 || row == col;
+    }
+
+    var seed = 0;
+    for (final unit in code.codeUnits) {
+      seed = ((seed * 31) + unit) & 0x7fffffff;
+    }
+    final index = row * 9 + col;
+    return ((seed >> (index % 29)) & 1) == 1 || (index + seed) % 7 == 0;
   }
 
   bool _canWithdraw(String? status) {

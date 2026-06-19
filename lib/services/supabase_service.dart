@@ -544,6 +544,23 @@ class SupabaseService {
     }
   }
 
+  Future<Map<String, dynamic>?> getEventTicketForUser(String eventId) async {
+    try {
+      final response = await client.rpc(
+        'get_event_ticket_for_user',
+        params: {'p_event_id': eventId},
+      );
+      final rows = List<Map<String, dynamic>>.from(
+        response as List? ?? const [],
+      );
+      if (rows.isEmpty) return null;
+      return rows.first;
+    } catch (e) {
+      debugPrint('SUPABASE getEventTicketForUser: failed to load ticket — $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> getMyEventPairingPreferences(
     String eventId,
   ) async {
