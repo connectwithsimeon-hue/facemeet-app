@@ -897,7 +897,9 @@ class _EventsScreenState extends State<EventsScreen> {
   }) {
     if (status != 'approved') return null;
 
-    final code = ticket?['ticket_code']?.toString().trim() ?? '';
+    final shortCode = ticket?['short_code']?.toString().trim() ?? '';
+    final longCode = ticket?['ticket_code']?.toString().trim() ?? '';
+    final code = shortCode.isNotEmpty ? shortCode : longCode;
     final ticketStatus = ticket?['ticket_status']?.toString() ?? 'pending';
     final available = ticket?['ticket_available'] == true && code.isNotEmpty;
     final checkedIn = ticketStatus == 'checked_in';
@@ -1001,7 +1003,7 @@ class _EventsScreenState extends State<EventsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Show this at check-in.',
+                        'Manual Code',
                         style: GoogleFonts.dmSans(
                           color: Colors.white,
                           fontSize: 13,
@@ -1010,7 +1012,7 @@ class _EventsScreenState extends State<EventsScreen> {
                       ),
                       const SizedBox(height: 7),
                       Text(
-                        'Your QR-style ticket uses a private FaceMeet code. Staff can also enter the code manually.',
+                        'Show this code at check-in. Codes are not case-sensitive, and hyphens are optional.',
                         style: GoogleFonts.dmSans(
                           color: const Color(0xFFC9F4DF),
                           fontSize: 11.5,
