@@ -83,6 +83,9 @@ class _EventsScreenState extends State<EventsScreen> {
       }
 
       events.sort((a, b) {
+        final aRank = (a['location_relevance_rank'] as num?)?.toInt() ?? 5;
+        final bRank = (b['location_relevance_rank'] as num?)?.toInt() ?? 5;
+        if (aRank != bRank) return aRank.compareTo(bRank);
         final aFeatured =
             a['featured'] == true ||
             (a['visibility']?.toString() ?? '') == 'featured';
