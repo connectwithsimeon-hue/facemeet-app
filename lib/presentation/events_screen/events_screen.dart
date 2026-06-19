@@ -255,7 +255,12 @@ class _EventsScreenState extends State<EventsScreen> {
                     else if (_events.isEmpty)
                       _buildEmptyCard()
                     else
-                      ..._events.map(_buildEventCard),
+                      ..._events.asMap().entries.map(
+                        (entry) => _buildEventCard(
+                          entry.value,
+                          featuredCard: entry.key == 0,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -265,6 +270,7 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Widget _buildHeroCard() {
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
@@ -278,6 +284,8 @@ class _EventsScreenState extends State<EventsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildHeroVisual(),
+          const SizedBox(height: 18),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -285,7 +293,7 @@ class _EventsScreenState extends State<EventsScreen> {
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
-              'Dallas preview',
+              'FaceMeet Events',
               style: GoogleFonts.dmSans(
                 color: AppTheme.primary,
                 fontSize: 12,
@@ -295,7 +303,7 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Curated in-person experiences for members who are ready to turn real video chemistry into real moments.',
+            'Curated in-person experiences for members ready to turn real chemistry into real moments.',
             style: GoogleFonts.cormorantGaramond(
               fontSize: 30,
               height: 1.08,
@@ -305,11 +313,67 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Limited guest lists. Approval-required event drops. Real-world access for members ready to meet beyond the screen, starting in Dallas.',
+            'Limited guest-list drops, approval-required invites, and real-world opportunities for FaceMeet members to connect beyond the screen.',
             style: GoogleFonts.dmSans(
               fontSize: 14,
               height: 1.65,
               color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroVisual() {
+    return Container(
+      height: 132,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF3A1712), Color(0xFF11100F)],
+        ),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -32,
+            top: -28,
+            child: _glowOrb(const Color(0x66E8503A), 126),
+          ),
+          Positioned(
+            left: -28,
+            bottom: -42,
+            child: _glowOrb(const Color(0x442E7DFF), 116),
+          ),
+          Positioned(
+            left: 18,
+            right: 18,
+            bottom: 18,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: _eventSkyline()),
+                const SizedBox(width: 16),
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: const Color(0x22FFFFFF),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0x33FFFFFF)),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Color(0xFFFFC1B8),
+                    size: 26,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -373,7 +437,7 @@ class _EventsScreenState extends State<EventsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Dallas Event Access Opens Soon',
+            'FaceMeet Events Are Coming Soon',
             style: GoogleFonts.dmSans(
               fontWeight: FontWeight.w700,
               color: Colors.white,
@@ -382,7 +446,7 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'We are preparing the first curated FaceMeet event drop for Dallas members. Complete your video profile now to improve your invite priority when access opens.',
+            'We are preparing curated social experiences for FaceMeet members. Complete your video profile now to improve your invite priority when access opens.',
             style: GoogleFonts.dmSans(
               color: AppTheme.textSecondary,
               fontSize: 13,
@@ -404,7 +468,10 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
-  Widget _buildEventCard(Map<String, dynamic> event) {
+  Widget _buildEventCard(
+    Map<String, dynamic> event, {
+    required bool featuredCard,
+  }) {
     final eventId = event['id']?.toString() ?? '';
     final status = _statuses[eventId];
     final requestBusy = _requesting && _requestingEventId == eventId;
@@ -427,186 +494,271 @@ class _EventsScreenState extends State<EventsScreen> {
         };
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.only(bottom: featuredCard ? 20 : 14),
       decoration: BoxDecoration(
         color: AppTheme.surfaceGlass,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.borderGlass),
+        borderRadius: BorderRadius.circular(featuredCard ? 26 : 20),
+        border: Border.all(
+          color: featuredCard ? const Color(0x44E8503A) : AppTheme.borderGlass,
+        ),
       ),
-      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  event['title']?.toString() ?? 'Untitled event',
+          _buildEventBanner(event, featuredCard: featuredCard),
+          Padding(
+            padding: EdgeInsets.all(featuredCard ? 20 : 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        event['title']?.toString() ?? 'Untitled event',
+                        style: GoogleFonts.dmSans(
+                          color: Colors.white,
+                          fontSize: featuredCard ? 21 : 17,
+                          height: 1.15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (event['featured'] == true ||
+                        event['visibility']?.toString() == 'featured')
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0x22D4A847),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          'Featured',
+                          style: GoogleFonts.dmSans(
+                            color: const Color(0xFFD4A847),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _pill(event['city_name']?.toString() ?? 'FaceMeet City'),
+                    _pill(
+                      _formatDateRange(event['starts_at'], event['ends_at']),
+                    ),
+                    _pill(
+                      _inviteRequirementLabel(
+                        event['invite_requirement']?.toString(),
+                      ),
+                    ),
+                    _guestListPill(guestListStatus),
+                    if ((event['venue_name']?.toString().trim() ?? '')
+                        .isNotEmpty)
+                      _pill(event['venue_name'].toString()),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  event['short_description']?.toString().trim().isNotEmpty ==
+                          true
+                      ? event['short_description'].toString()
+                      : 'Curated FaceMeet experience for verified members.',
                   style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textSecondary,
+                    fontSize: featuredCard ? 14 : 13,
+                    height: 1.6,
                   ),
                 ),
-              ),
-              if (event['featured'] == true ||
-                  event['visibility']?.toString() == 'featured')
+                if (accessNote.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0x1A2A1714),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0x33E8503A)),
+                    ),
+                    padding: const EdgeInsets.all(14),
+                    child: Text(
+                      accessNote,
+                      style: GoogleFonts.dmSans(
+                        color: const Color(0xFFF3D3CD),
+                        fontSize: 12,
+                        height: 1.6,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+                if (_statusExplanation(status, ticketState).isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _statusExplanationBlock(
+                    _statusExplanation(status, ticketState),
+                  ),
+                ],
+                ...switch (_capacityHint(event)) {
+                  final String hint => [
+                    const SizedBox(height: 10),
+                    _statusExplanationBlock(hint, subtle: true),
+                  ],
+                  null => const <Widget>[],
+                },
+                const SizedBox(height: 18),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _requestButton(
+                      eventId: eventId,
+                      status: status,
+                      busy: requestBusy,
+                      guestListStatus: guestListStatus,
+                      accessMode: accessMode,
+                    ),
+                    if (_canWithdraw(status)) ...[
+                      const SizedBox(height: 10),
+                      _withdrawButton(eventId: eventId, busy: withdrawBusy),
+                    ],
+                  ],
+                ),
+                ...switch (_buildEventAccessTicketBlock(
+                  ticketState: ticketState,
+                  accessDetails: accessDetails,
+                )) {
+                  final Widget block => [const SizedBox(height: 14), block],
+                  null => const <Widget>[],
+                },
+                ...switch (_buildPairingPreferencesEntryBlock(
+                  event: event,
+                  eventId: eventId,
+                  status: status,
+                  ticketState: ticketState,
+                  pairingPreferences: pairingPreferences,
+                )) {
+                  final Widget block => [const SizedBox(height: 14), block],
+                  null => const <Widget>[],
+                },
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventBanner(
+    Map<String, dynamic> event, {
+    required bool featuredCard,
+  }) {
+    final city = event['city_name']?.toString() ?? 'FaceMeet City';
+    final colors = _eventBannerColors(city);
+    return Container(
+      height: featuredCard ? 154 : 106,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -30,
+            top: -38,
+            child: _glowOrb(const Color(0x66FFFFFF), featuredCard ? 128 : 96),
+          ),
+          Positioned(
+            left: 18,
+            right: 18,
+            bottom: 16,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: _eventSkyline(compact: !featuredCard)),
+                const SizedBox(width: 14),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
-                    vertical: 5,
+                    vertical: 7,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0x22D4A847),
+                    color: const Color(0x66000000),
                     borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0x33FFFFFF)),
                   ),
                   child: Text(
-                    'Featured Drop',
+                    city,
                     style: GoogleFonts.dmSans(
-                      color: const Color(0xFFD4A847),
-                      fontSize: 11,
+                      color: Colors.white,
+                      fontSize: featuredCard ? 12 : 11,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _guestListPill(guestListStatus),
-              _accessModePill(accessMode),
-              _pill(event['event_type']?.toString() ?? 'Event'),
-              _pill(event['city_name']?.toString() ?? 'Dallas'),
-              _pill(_formatDateRange(event['starts_at'], event['ends_at'])),
-              _pill(
-                _inviteRequirementLabel(
-                  event['invite_requirement']?.toString(),
-                ),
-              ),
-              if ((event['capacity'] as num?) != null &&
-                  (event['capacity'] as num).toInt() > 0)
-                _pill(
-                  'Limited Guest List · ${(event['capacity'] as num).toInt()}',
-                ),
-              if ((event['venue_name']?.toString().trim() ?? '').isNotEmpty)
-                _pill(event['venue_name'].toString()),
-              if (event['video_required'] == true)
-                _pill(
-                  'Video Profile Required',
-                  backgroundColor: const Color(0x22E8503A),
-                  borderColor: const Color(0x44E8503A),
-                  textColor: AppTheme.primary,
-                ),
-              if (event['verification_required'] == true)
-                _pill(
-                  'Verified Members Only',
-                  backgroundColor: const Color(0x223A241D),
-                  borderColor: const Color(0x55E8503A),
-                  textColor: const Color(0xFFFFC1B8),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            event['short_description']?.toString().trim().isNotEmpty == true
-                ? event['short_description'].toString()
-                : 'Curated FaceMeet experience for verified members.',
-            style: GoogleFonts.dmSans(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              height: 1.65,
-            ),
-          ),
-          if (accessNote.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0x1A2A1714),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0x33E8503A)),
-              ),
-              padding: const EdgeInsets.all(14),
-              child: Text(
-                accessNote,
-                style: GoogleFonts.dmSans(
-                  color: const Color(0xFFF3D3CD),
-                  fontSize: 12,
-                  height: 1.6,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Text(
-            _accessModeHelperCopy(accessMode),
-            style: GoogleFonts.dmSans(
-              color: AppTheme.textMuted,
-              fontSize: 12,
-              height: 1.55,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _guestListHelperCopy(guestListStatus),
-            style: GoogleFonts.dmSans(
-              color: AppTheme.textMuted,
-              fontSize: 12,
-              height: 1.55,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          if (_statusExplanation(status, ticketState).isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _statusExplanationBlock(_statusExplanation(status, ticketState)),
-          ],
-          ...switch (_capacityHint(event)) {
-            final String hint => [
-              const SizedBox(height: 10),
-              _statusExplanationBlock(hint, subtle: true),
-            ],
-            null => const <Widget>[],
-          },
-          const SizedBox(height: 18),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _requestButton(
-                eventId: eventId,
-                status: status,
-                busy: requestBusy,
-                guestListStatus: guestListStatus,
-                accessMode: accessMode,
-              ),
-              if (_canWithdraw(status)) ...[
-                const SizedBox(height: 10),
-                _withdrawButton(eventId: eventId, busy: withdrawBusy),
               ],
-            ],
+            ),
           ),
-          ...switch (_buildEventAccessTicketBlock(
-            ticketState: ticketState,
-            accessDetails: accessDetails,
-          )) {
-            final Widget block => [const SizedBox(height: 14), block],
-            null => const <Widget>[],
-          },
-          ...switch (_buildPairingPreferencesEntryBlock(
-            event: event,
-            eventId: eventId,
-            status: status,
-            ticketState: ticketState,
-            pairingPreferences: pairingPreferences,
-          )) {
-            final Widget block => [const SizedBox(height: 14), block],
-            null => const <Widget>[],
-          },
         ],
+      ),
+    );
+  }
+
+  List<Color> _eventBannerColors(String seed) {
+    final palettes = const [
+      [Color(0xFF3A1712), Color(0xFF11100F)],
+      [Color(0xFF17313A), Color(0xFF11100F)],
+      [Color(0xFF302616), Color(0xFF11100F)],
+      [Color(0xFF1F243A), Color(0xFF11100F)],
+    ];
+    return palettes[seed.hashCode.abs() % palettes.length];
+  }
+
+  Widget _eventSkyline({bool compact = false}) {
+    final heights = compact
+        ? const [26.0, 42.0, 32.0, 54.0, 36.0, 46.0]
+        : const [34.0, 58.0, 42.0, 76.0, 50.0, 64.0, 38.0];
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (var i = 0; i < heights.length; i++) ...[
+          Expanded(
+            child: Container(
+              height: heights[i],
+              decoration: BoxDecoration(
+                color: i.isEven
+                    ? const Color(0x2EFFFFFF)
+                    : const Color(0x1FFFFFFF),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(8),
+                ),
+                border: Border.all(color: const Color(0x1FFFFFFF)),
+              ),
+            ),
+          ),
+          if (i != heights.length - 1) const SizedBox(width: 7),
+        ],
+      ],
+    );
+  }
+
+  Widget _glowOrb(Color color, double size) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)]),
       ),
     );
   }
@@ -1112,65 +1264,6 @@ class _EventsScreenState extends State<EventsScreen> {
     }
   }
 
-  String _accessModeLabel(String mode) {
-    switch (mode) {
-      case 'pair_priority':
-        return 'Pair Priority';
-      case 'match_unlocked':
-        return 'Match-Unlocked Access';
-      case 'invite_only':
-        return 'Invite Only';
-      default:
-        return 'Individual Access';
-    }
-  }
-
-  String _accessModeHelperCopy(String mode) {
-    switch (mode) {
-      case 'pair_priority':
-        return 'Matched pairs may receive priority guest-list consideration.';
-      case 'match_unlocked':
-        return 'Unlock a mutual Match in FaceMeet to qualify for this event.';
-      case 'invite_only':
-        return 'Access is reserved for selected FaceMeet members.';
-      default:
-        return 'Request access for individual guest-list consideration.';
-    }
-  }
-
-  Widget _accessModePill(String mode) {
-    switch (mode) {
-      case 'pair_priority':
-        return _pill(
-          _accessModeLabel(mode),
-          backgroundColor: const Color(0x22D4A847),
-          borderColor: const Color(0x44D4A847),
-          textColor: const Color(0xFFD4A847),
-        );
-      case 'match_unlocked':
-        return _pill(
-          _accessModeLabel(mode),
-          backgroundColor: const Color(0x22E8503A),
-          borderColor: const Color(0x44E8503A),
-          textColor: AppTheme.primary,
-        );
-      case 'invite_only':
-        return _pill(
-          _accessModeLabel(mode),
-          backgroundColor: const Color(0x223A241D),
-          borderColor: const Color(0x553A241D),
-          textColor: const Color(0xFFFFC1B8),
-        );
-      default:
-        return _pill(
-          _accessModeLabel(mode),
-          backgroundColor: const Color(0x141B84FF),
-          borderColor: const Color(0x22FFFFFF),
-          textColor: Colors.white70,
-        );
-    }
-  }
-
   String _normalizedGuestListStatus(String? value) {
     switch (value) {
       case 'limited':
@@ -1195,21 +1288,6 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'Access Closed';
       default:
         return 'Access Open';
-    }
-  }
-
-  String _guestListHelperCopy(String status) {
-    switch (status) {
-      case 'limited':
-        return 'Limited spots remain. Invite requests are reviewed individually.';
-      case 'finalizing':
-        return 'The guest list is being finalized. Waitlist requests are still open.';
-      case 'full':
-        return 'The guest list is full. Join the waitlist for possible access.';
-      case 'closed':
-        return 'Invite requests are now closed.';
-      default:
-        return 'Invite requests are reviewed individually.';
     }
   }
 
