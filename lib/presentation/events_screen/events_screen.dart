@@ -884,6 +884,8 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'Not selected for this round. You can request access to future FaceMeet events.';
       case 'approved':
         return 'You’re approved for this event. Watch this card for your event details and Pair Ticket updates.';
+      case 'cancelled':
+        return 'Request Withdrawn\nYou withdrew your access request. You can request access again while this event is still open.';
       default:
         return '';
     }
@@ -1163,7 +1165,7 @@ class _EventsScreenState extends State<EventsScreen> {
             'waitlisted' => 'Waitlist Open',
             'approved' => 'Guest List Approved',
             'rejected' => 'Not Selected This Round',
-            'cancelled' => 'Event Cancelled',
+            'cancelled' => 'Request Access Again',
             _ => 'Request Invite',
           }
         : guestListStatus == 'closed'
@@ -1181,7 +1183,7 @@ class _EventsScreenState extends State<EventsScreen> {
           };
 
     final enabled =
-        status == null &&
+        (status == null || status == 'cancelled') &&
         !busy &&
         guestListStatus != 'closed' &&
         accessMode != 'invite_only' &&
@@ -1190,7 +1192,8 @@ class _EventsScreenState extends State<EventsScreen> {
         ? switch (status) {
             'approved' => AppTheme.sparkGreen,
             'waitlisted' => const Color(0xFFD4A847),
-            'rejected' || 'cancelled' => const Color(0xFF3A312E),
+            'rejected' => const Color(0xFF3A312E),
+            'cancelled' => AppTheme.primary,
             'requested' => const Color(0xFF1E3026),
             _ => AppTheme.primary,
           }
