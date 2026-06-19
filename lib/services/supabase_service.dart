@@ -610,6 +610,14 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map? ?? const {});
   }
 
+  Future<Map<String, dynamic>> withdrawEventRequest(String eventId) async {
+    final response = await client.rpc(
+      'withdraw_event_request',
+      params: {'p_event_id': eventId},
+    );
+    return Map<String, dynamic>.from(response as Map? ?? const {});
+  }
+
   Future<bool> hasChatUnlockedMatch() async {
     final uid = currentUserId;
     if (uid == null) return false;

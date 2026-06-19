@@ -29,6 +29,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
   bool _isLoading = true;
   List<Map<String, dynamic>> _profiles = [];
+  bool _hasUpcomingEvents = false;
 
   late AnimationController _cardController;
   late Animation<Offset> _cardSlide;
@@ -57,10 +58,16 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
   Future<void> _loadProfiles() async {
     setState(() => _isLoading = true);
     try {
-      final profiles = await SupabaseService.instance.getDiscoveryFeed();
+      final results = await Future.wait([
+        SupabaseService.instance.getDiscoveryFeed(),
+        SupabaseService.instance.getMyAccessibleEvents(),
+      ]);
+      final profiles = List<Map<String, dynamic>>.from(results[0] as List);
+      final events = List<Map<String, dynamic>>.from(results[1] as List);
       if (mounted) {
         setState(() {
           _profiles = profiles;
+          _hasUpcomingEvents = events.isNotEmpty;
           _currentCardIndex = 0;
           _isLoading = false;
         });
@@ -612,10 +619,83 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
           ),
         ),
         const SizedBox(height: 12),
+        if (_hasUpcomingEvents) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _buildEventsPromoCard(),
+          ),
+          const SizedBox(height: 12),
+        ],
         // Card stack
         Expanded(child: Center(child: _buildCardArea(size, isTablet))),
         SizedBox(height: isTablet ? 16 : 90),
       ],
+    );
+  }
+
+  Widget _buildEventsPromoCard() {
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, AppRoutes.eventsScreen),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceGlass,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.borderGlass),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: const Color(0x22E8503A),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.event_available_rounded,
+                color: AppTheme.primary,
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Upcoming FaceMeet Events',
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Request access to curated FaceMeet social events.',
+                    style: GoogleFonts.dmSans(
+                      color: AppTheme.textMuted,
+                      fontSize: 11,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'View Events',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

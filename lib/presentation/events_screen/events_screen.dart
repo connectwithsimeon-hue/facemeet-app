@@ -15,6 +15,8 @@ class _EventsScreenState extends State<EventsScreen> {
   bool _loading = true;
   bool _requesting = false;
   String? _requestingEventId;
+  bool _withdrawing = false;
+  String? _withdrawingEventId;
   String? _error;
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _events = const [];
@@ -162,6 +164,49 @@ class _EventsScreenState extends State<EventsScreen> {
         setState(() {
           _requesting = false;
           _requestingEventId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _withdrawRequest(String eventId) async {
+    setState(() {
+      _withdrawing = true;
+      _withdrawingEventId = eventId;
+    });
+
+    try {
+      final row = await SupabaseService.instance.withdrawEventRequest(eventId);
+      final status = row['status']?.toString() ?? 'cancelled';
+      if (!mounted) return;
+      setState(() {
+        _statuses = {..._statuses, eventId: status};
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Event request withdrawn.',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.sparkGreen,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not withdraw this request yet. Please try again.',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _withdrawing = false;
+          _withdrawingEventId = null;
         });
       }
     }
@@ -360,6 +405,7 @@ class _EventsScreenState extends State<EventsScreen> {
     final eventId = event['id']?.toString() ?? '';
     final status = _statuses[eventId];
     final requestBusy = _requesting && _requestingEventId == eventId;
+    final withdrawBusy = _withdrawing && _withdrawingEventId == eventId;
     final guestListStatus = _normalizedGuestListStatus(
       event['guest_list_status']?.toString(),
     );
@@ -512,18 +558,32 @@ class _EventsScreenState extends State<EventsScreen> {
               fontWeight: FontWeight.w500,
             ),
           ),
+          if (_statusExplanation(status, ticketState).isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _statusExplanationBlock(_statusExplanation(status, ticketState)),
+          ],
+          ...switch (_capacityHint(event)) {
+            final String hint => [
+              const SizedBox(height: 10),
+              _statusExplanationBlock(hint, subtle: true),
+            ],
+            null => const <Widget>[],
+          },
           const SizedBox(height: 18),
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: _requestButton(
-                  eventId: eventId,
-                  status: status,
-                  busy: requestBusy,
-                  guestListStatus: guestListStatus,
-                  accessMode: accessMode,
-                ),
+              _requestButton(
+                eventId: eventId,
+                status: status,
+                busy: requestBusy,
+                guestListStatus: guestListStatus,
+                accessMode: accessMode,
               ),
+              if (_canWithdraw(status)) ...[
+                const SizedBox(height: 10),
+                _withdrawButton(eventId: eventId, busy: withdrawBusy),
+              ],
             ],
           ),
           ...switch (_buildEventAccessTicketBlock(
@@ -648,6 +708,65 @@ class _EventsScreenState extends State<EventsScreen> {
       default:
         return null;
     }
+  }
+
+  bool _canWithdraw(String? status) {
+    return status == 'requested' || status == 'waitlisted';
+  }
+
+  String _statusExplanation(String? status, String? ticketState) {
+    if (ticketState == 'released_anchor_pair' ||
+        ticketState == 'released_open_social_access') {
+      return 'Your FaceMeet Pair Ticket is ready.';
+    }
+
+    switch (status) {
+      case 'requested':
+        return 'Access requested. We’ll notify you if you’re approved.';
+      case 'waitlisted':
+        return 'You’re on the waitlist. We’ll notify you if a spot opens.';
+      case 'rejected':
+        return 'Not selected for this round. You can request access to future FaceMeet events.';
+      case 'approved':
+        return 'You’re approved for this event. Watch this card for your event details and Pair Ticket updates.';
+      default:
+        return '';
+    }
+  }
+
+  String? _capacityHint(Map<String, dynamic> event) {
+    final capacity = (event['capacity'] as num?)?.toInt();
+    if (capacity == null || capacity <= 0) return null;
+    final guestListStatus = _normalizedGuestListStatus(
+      event['guest_list_status']?.toString(),
+    );
+    if (guestListStatus == 'full' || guestListStatus == 'finalizing') {
+      return 'Few spots left';
+    }
+    return 'Limited spots available';
+  }
+
+  Widget _statusExplanationBlock(String message, {bool subtle = false}) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: subtle ? const Color(0x141B8F5A) : const Color(0x1A2A1714),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: subtle ? const Color(0x331B8F5A) : const Color(0x33E8503A),
+        ),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Text(
+        message,
+        style: GoogleFonts.dmSans(
+          color: subtle ? const Color(0xFFC9F4DF) : const Color(0xFFF3D3CD),
+          fontSize: 12,
+          height: 1.55,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 
   Widget _eventAccessMessageBlock({
@@ -949,6 +1068,31 @@ class _EventsScreenState extends State<EventsScreen> {
             )
           : Text(
               buttonLabel,
+              style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
+            ),
+    );
+  }
+
+  Widget _withdrawButton({required String eventId, required bool busy}) {
+    return OutlinedButton(
+      onPressed: busy ? null : () => _withdrawRequest(eventId),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFF3D3CD),
+        side: const BorderSide(color: Color(0x55E8503A)),
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: busy
+          ? const SizedBox(
+              height: 18,
+              width: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFF3D3CD)),
+              ),
+            )
+          : Text(
+              'Withdraw Request',
               style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
             ),
     );

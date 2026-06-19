@@ -356,6 +356,15 @@ class PushNotificationService {
         return 'Chat unlocked';
       case 'new_message':
         return 'New message';
+      case 'event_reminder':
+      case 'pairing_preferences_open':
+      case 'pairing_preferences_closing_soon':
+      case 'pair_ticket_released':
+      case 'event_tomorrow':
+      case 'event_approved':
+      case 'event_waitlisted':
+      case 'event_rejected':
+        return 'FaceMeet Events';
       default:
         return 'FaceMeet';
     }
@@ -374,6 +383,19 @@ class PushNotificationService {
         return 'You both felt the spark. Say hello.';
       case 'new_message':
         return 'Open FaceMeet to reply.';
+      case 'pairing_preferences_open':
+      case 'pairing_preferences_closing_soon':
+        return 'Open FaceMeet to update your event preferences.';
+      case 'pair_ticket_released':
+        return 'Open FaceMeet to view your Pair Ticket.';
+      case 'event_tomorrow':
+      case 'event_reminder':
+        return 'Open FaceMeet to review your event details.';
+      case 'event_approved':
+        return 'Open FaceMeet to view your event access.';
+      case 'event_waitlisted':
+      case 'event_rejected':
+        return 'Open FaceMeet to view your event status.';
       default:
         return '';
     }
@@ -636,8 +658,33 @@ class PushNotificationService {
         }
         break;
       default:
-        debugPrint('PUSH: Unknown notification type — $type');
-        _log('PUSH: Unknown notification type — $type');
+        if (_isEventNotificationType(type)) {
+          final shell = mainShellKey.currentState;
+          _log('EVENTS: route target after notification tap — eventsScreen');
+          if (shell != null) {
+            shell.openEvents();
+          } else {
+            navigator.pushNamedAndRemoveUntil(
+              AppRoutes.eventsScreen,
+              (route) => false,
+            );
+          }
+        } else {
+          debugPrint('PUSH: Unknown notification type — $type');
+          _log('PUSH: Unknown notification type — $type');
+        }
     }
+  }
+
+  bool _isEventNotificationType(String? type) {
+    final normalized = type?.trim().toLowerCase().replaceAll('-', '_');
+    return normalized == 'event_reminder' ||
+        normalized == 'pairing_preferences_open' ||
+        normalized == 'pairing_preferences_closing_soon' ||
+        normalized == 'pair_ticket_released' ||
+        normalized == 'event_tomorrow' ||
+        normalized == 'event_approved' ||
+        normalized == 'event_waitlisted' ||
+        normalized == 'event_rejected';
   }
 }

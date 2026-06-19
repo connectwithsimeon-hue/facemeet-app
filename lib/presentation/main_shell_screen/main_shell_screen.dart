@@ -718,6 +718,15 @@ class MainShellScreenState extends State<MainShellScreen> {
     });
   }
 
+  /// Opens the Events tab from app-level notification routing.
+  void openEvents() {
+    if (_currentIndex != eventsTabIndex) {
+      setState(() {
+        _currentIndex = eventsTabIndex;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
