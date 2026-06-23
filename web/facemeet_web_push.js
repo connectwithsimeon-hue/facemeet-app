@@ -230,6 +230,74 @@
     }
   };
 
+  window.facemeetRefreshWebPushSubscription = async function (vapidPublicKey) {
+    if (!window.facemeetIsWebPushSupported()) {
+      console.warn("WEB PUSH: unsupported browser");
+      return { error: "unsupported", permission: "unsupported" };
+    }
+
+    if (!vapidPublicKey || vapidPublicKey.indexOf("REPLACE_") === 0) {
+      console.warn("WEB PUSH: missing VAPID public key");
+      return { error: "missing_vapid_public_key", permission: Notification.permission };
+    }
+
+    var permission = Notification.permission;
+    if (permission !== "granted") {
+      return { permission: permission, subscriptionCreated: false };
+    }
+
+    try {
+      var registration = await getPushRegistration(true);
+      await waitForPushServiceWorker(registration);
+      var isFaceMeetWorker = isFaceMeetPushRegistration(registration);
+
+      if (!isFaceMeetWorker) {
+        return {
+          permission: permission,
+          serviceWorkerReady: Boolean(registration),
+          isFaceMeetWorker: false,
+          subscriptionCreated: false,
+          error: "wrong_service_worker",
+        };
+      }
+
+      var existing = await registration.pushManager.getSubscription();
+      var subscription =
+        existing ||
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToUint8Array(vapidPublicKey),
+        }));
+
+      var json = subscription.toJSON();
+      return {
+        endpoint: json.endpoint,
+        p256dh: json.keys && json.keys.p256dh,
+        auth: json.keys && json.keys.auth,
+        userAgent: window.navigator.userAgent || "",
+        platform: getPlatform(),
+        permission: permission,
+        serviceWorkerReady: true,
+        isFaceMeetWorker: true,
+        subscriptionCreated: Boolean(json.endpoint && json.keys && json.keys.p256dh && json.keys.auth),
+        subscriptionRefreshed: true,
+        usedExistingSubscription: Boolean(existing),
+      };
+    } catch (error) {
+      console.warn("WEB PUSH: refresh failure", {
+        name: error && error.name ? error.name : "UnknownError",
+      });
+      return {
+        permission: permission,
+        serviceWorkerReady: false,
+        isFaceMeetWorker: false,
+        subscriptionCreated: false,
+        subscriptionRefreshed: false,
+        error: error && error.name ? error.name : "refresh_failed",
+      };
+    }
+  };
+
   window.facemeetGetWebPushSubscriptionStatus = async function () {
     if (!window.facemeetIsWebPushSupported()) {
       return { permission: "unsupported", subscriptionStatus: "unsupported" };

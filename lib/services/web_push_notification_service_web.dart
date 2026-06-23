@@ -63,8 +63,8 @@ class WebPushNotificationService {
       }
 
       if (permission == 'granted') {
-        final verified = await _verifySavedSubscription();
-        if (verified) {
+        final refreshed = await refreshExistingSubscription();
+        if (refreshed.success) {
           return const WebPushSetupResult(
             success: true,
             status: 'Notifications enabled',
@@ -91,6 +91,110 @@ class WebPushNotificationService {
         success: false,
         status: 'Could not check notifications',
         message: 'We could not check notification status. Please try again.',
+      );
+    }
+  }
+
+  Future<WebPushSetupResult> refreshExistingSubscription() async {
+    try {
+      final supported = _callJsBool('facemeetIsWebPushSupported');
+      if (!supported) {
+        return const WebPushSetupResult(
+          success: false,
+          status: 'Notifications are not supported',
+          message: 'Notifications are not supported on this browser.',
+        );
+      }
+
+      final permission = _callJsString('facemeetGetNotificationPermission');
+      if (permission != 'granted') {
+        return WebPushSetupResult(
+          success: false,
+          status: permission == 'denied'
+              ? 'Notifications blocked'
+              : 'Enable Notifications',
+          message: permission == 'denied'
+              ? 'Notifications are blocked. Enable them in your browser settings.'
+              : 'Notifications are not enabled on this device.',
+        );
+      }
+
+      if (_vapidPublicKey.isEmpty) {
+        debugPrint('WEB PUSH: refresh skipped; missing VAPID public key');
+        return const WebPushSetupResult(
+          success: false,
+          status: 'Could not finish enabling notifications',
+          message:
+              'Notifications are not configured yet. Please try again after the next update.',
+        );
+      }
+
+      final raw = await _callJsPromise('facemeetRefreshWebPushSubscription', [
+        _vapidPublicKey,
+      ]);
+      final result = _jsObjectToMap(raw);
+      final serviceWorkerReady = result['serviceWorkerReady'] == true;
+      final isFaceMeetWorker = result['isFaceMeetWorker'] == true;
+      final endpoint = result['endpoint']?.toString() ?? '';
+      final p256dh = result['p256dh']?.toString() ?? '';
+      final auth = result['auth']?.toString() ?? '';
+      final userAgent = result['userAgent']?.toString() ?? '';
+      final platform = result['platform']?.toString() ?? 'web';
+      final hasSubscription =
+          endpoint.isNotEmpty && p256dh.isNotEmpty && auth.isNotEmpty;
+
+      if (!serviceWorkerReady || !isFaceMeetWorker || !hasSubscription) {
+        debugPrint(
+          'WEB PUSH: refresh incomplete worker=$isFaceMeetWorker subscription=$hasSubscription',
+        );
+        return WebPushSetupResult(
+          success: false,
+          status: 'Finish enabling notifications',
+          message: _diagnosticMessage(
+            permissionGranted: true,
+            serviceWorkerReady: serviceWorkerReady,
+            isFaceMeetWorker: isFaceMeetWorker,
+            subscriptionCreated: hasSubscription,
+            subscriptionSaved: false,
+            subscriptionVerified: false,
+            fallback:
+                'Permission is allowed, but FaceMeet needs to finish saving this device.',
+          ),
+        );
+      }
+
+      final saved = await _saveSubscription(
+        endpoint: endpoint,
+        p256dh: p256dh,
+        auth: auth,
+        userAgent: userAgent,
+        platform: platform,
+      );
+      if (!saved) {
+        return const WebPushSetupResult(
+          success: false,
+          status: 'Could not finish enabling notifications',
+          message: 'We could not save this device. Please try again.',
+        );
+      }
+
+      final verified = await _verifySavedSubscription(endpoint: endpoint);
+      return WebPushSetupResult(
+        success: verified,
+        status: verified
+            ? 'Notifications enabled'
+            : 'Could not finish enabling notifications',
+        message: verified
+            ? 'Notifications enabled.'
+            : 'We could not verify this device. Please try again.',
+      );
+    } catch (e) {
+      debugPrint('WEB PUSH: refresh failed — $e');
+      return const WebPushSetupResult(
+        success: false,
+        status: 'Could not finish enabling notifications',
+        message:
+            'We could not finish enabling notifications. Please try again.',
       );
     }
   }

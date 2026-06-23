@@ -39,6 +39,14 @@ class WebPushNotificationService {
     );
   }
 
+  Future<WebPushSetupResult> refreshExistingSubscription() async {
+    return const WebPushSetupResult(
+      success: false,
+      status: 'Notifications unavailable',
+      message: 'Web push is only available in the web app.',
+    );
+  }
+
   Future<WebPushSetupResult> sendTestNotification() async {
     return const WebPushSetupResult(
       success: false,

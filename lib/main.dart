@@ -18,6 +18,7 @@ import './services/push_notification_service.dart';
 import './services/revenuecat_service.dart';
 import './services/supabase_service.dart';
 import './services/install_gate_service.dart';
+import './services/web_push_notification_service.dart';
 import './widgets/custom_error_widget.dart';
 import 'core/app_export.dart';
 
@@ -934,7 +935,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (_pushNotificationStarted) return;
     if (kIsWeb) {
       _pushNotificationStarted = true;
-      debugPrint('WEB PUSH DISABLED: startup push disabled');
+      debugPrint('WEB PUSH: refreshing current PWA subscription at startup');
+      unawaited(
+        WebPushNotificationService.instance.refreshExistingSubscription(),
+      );
       return;
     }
     if (!_firebaseInitialized) {
