@@ -127,7 +127,7 @@ class RevenueCatService {
       debugPrint(
         'REVENUECAT: purchase succeeded — activeSubscriptions=${result.customerInfo.activeSubscriptions}',
       );
-      await _handlePurchaseSuccess(productId, result.customerInfo);
+      await _handlePurchaseSuccess(productId, result);
       return RCPurchaseStatus.success;
     } on PlatformException catch (e) {
       final code = PurchasesErrorHelper.getErrorCode(e);
@@ -282,11 +282,16 @@ class RevenueCatService {
 
   Future<void> _handlePurchaseSuccess(
     String productId,
-    CustomerInfo customerInfo,
+    PurchaseResult result,
   ) async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) {
       debugPrint('REVENUECAT: no authenticated user — skipping Supabase sync');
+      return;
+    }
+
+    if (!kIsWeb && Platform.isAndroid) {
+      await _recordGooglePlayPurchase(productId, result.storeTransaction);
       return;
     }
 
@@ -304,6 +309,47 @@ class RevenueCatService {
     }
 
     debugPrint('REVENUECAT: unknown productId=$productId — no Supabase update');
+  }
+
+  Future<void> _recordGooglePlayPurchase(
+    String productId,
+    StoreTransaction transaction,
+  ) async {
+    final providerOrderId = transaction.transactionIdentifier.trim();
+    final storeProductId = transaction.productIdentifier.trim();
+    final purchasedAt = transaction.purchaseDate.trim();
+
+    if (providerOrderId.isEmpty) {
+      throw Exception('Google Play purchase is missing a transaction id.');
+    }
+
+    final response = await Supabase.instance.client.rpc(
+      'record_google_play_purchase',
+      params: {
+        'p_product_id': productId,
+        'p_provider_order_id': providerOrderId,
+        'p_provider_purchase_token': null,
+        'p_store_product_id': storeProductId.isEmpty ? null : storeProductId,
+        'p_purchased_at': purchasedAt.isEmpty ? null : purchasedAt,
+        'p_metadata': {
+          'revenuecat_store_product_id': storeProductId,
+          'client_platform': 'android',
+        },
+      },
+    );
+
+    final responseMap = response is Map
+        ? Map<String, dynamic>.from(response)
+        : <String, dynamic>{};
+    final success = responseMap['success'] == true;
+    if (!success) {
+      throw Exception('Google Play purchase could not be recorded.');
+    }
+
+    debugPrint(
+      'REVENUECAT: Google Play purchase recorded — '
+      'product=$productId, duplicate=${responseMap['duplicate'] == true}',
+    );
   }
 
   /// Credit spark bundle — always adds, no cap (mirrors stripe_webhook).
