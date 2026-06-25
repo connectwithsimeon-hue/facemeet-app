@@ -12,6 +12,7 @@ import './widgets/onboarding_step1_widget.dart';
 import './widgets/onboarding_step2_widget.dart';
 import './widgets/onboarding_step3_widget.dart';
 import './widgets/onboarding_step4_widget.dart';
+import './widgets/onboarding_connection_intent_widget.dart';
 import './widgets/onboarding_step_indicator_widget.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -32,6 +33,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   int _age = 24;
   String _gender = '';
   String _interestedIn = '';
+  String _connectionIntent = SupabaseService.defaultConnectionIntent;
 
   // Step 2 data
   final List<String> _selectedInterests = [];
@@ -142,11 +144,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
         case 1:
           await SupabaseService.instance.saveOnboardingStep({
-            'interests': _selectedInterests,
+            'connection_intent': SupabaseService.normalizeConnectionIntent(
+              _connectionIntent,
+            ),
           });
           assert(() {
             debugPrint(
-              '[Onboarding] Step 2 saved — interests: $_selectedInterests',
+              '[Onboarding] Step 2 saved — connection_intent: $_connectionIntent',
             );
             return true;
           }());
@@ -154,6 +158,19 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           break;
 
         case 2:
+          await SupabaseService.instance.saveOnboardingStep({
+            'interests': _selectedInterests,
+          });
+          assert(() {
+            debugPrint(
+              '[Onboarding] Step 3 saved — interests: $_selectedInterests',
+            );
+            return true;
+          }());
+          saved = true;
+          break;
+
+        case 3:
           final locationData = <String, dynamic>{
             'city': _city.trim(),
             'state_region': _stateRegion.trim(),
@@ -186,21 +203,21 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           await SupabaseService.instance.saveOnboardingStep(locationData);
           assert(() {
             debugPrint(
-              '[Onboarding] Step 3 saved — city: $_city, state_region: $_stateRegion, country: $_country, metro_area: $_metroArea, location_source: $_locationSource, canonical_place_selected=${_canonicalPlaceId != null}, location_permission_granted: $_locationPermissionGranted',
+              '[Onboarding] Step 4 saved — city: $_city, state_region: $_stateRegion, country: $_country, metro_area: $_metroArea, location_source: $_locationSource, canonical_place_selected=${_canonicalPlaceId != null}, location_permission_granted: $_locationPermissionGranted',
             );
             return true;
           }());
           saved = true;
           break;
 
-        case 3:
+        case 4:
           await SupabaseService.instance.saveOnboardingStep({
             'profile_video_url': _profileVideoUrl,
             'verification_status': 'pending',
           }, markComplete: true);
           assert(() {
             debugPrint(
-              '[Onboarding] Step 4 saved — profile_video_url: $_profileVideoUrl, verification_status: pending, onboarding_complete: true',
+              '[Onboarding] Step 5 saved — profile_video_url: $_profileVideoUrl, verification_status: pending, onboarding_complete: true',
             );
             return true;
           }());
@@ -227,7 +244,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
     if (!saved) return;
 
-    if (_currentStep < 3) {
+    if (_currentStep < 4) {
       setState(() => _currentStep++);
       _slideController.reset();
       _slideController.forward();
@@ -304,13 +321,15 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             _interestedIn.isNotEmpty &&
             _age >= 18;
       case 1:
-        return _selectedInterests.length >= 3;
+        return _connectionIntent.isNotEmpty;
       case 2:
+        return _selectedInterests.length >= 3;
+      case 3:
         return _city.trim().isNotEmpty &&
             _stateRegion.trim().isNotEmpty &&
             _country.trim().isNotEmpty &&
             _canonicalPlaceId != null;
-      case 3:
+      case 4:
         return _profileVideoUrl != null;
       default:
         return false;
@@ -374,7 +393,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                             const SizedBox(width: 40),
                           const Spacer(),
                           Text(
-                            'Step ${_currentStep + 1} of 4',
+                            'Step ${_currentStep + 1} of 5',
                             style: GoogleFonts.dmSans(
                               fontSize: 13,
                               color: AppTheme.textMuted,
@@ -391,7 +410,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: OnboardingStepIndicatorWidget(
                         currentStep: _currentStep,
-                        totalSteps: 4,
+                        totalSteps: 5,
                       ),
                     ),
                     const SizedBox(height: 28),
@@ -434,6 +453,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           onInterestedInChanged: (v) => setState(() => _interestedIn = v),
         );
       case 1:
+        return OnboardingConnectionIntentWidget(
+          selectedIntent: _connectionIntent,
+          onIntentChanged: (v) => setState(() => _connectionIntent = v),
+        );
+      case 2:
         return OnboardingStep2Widget(
           selectedInterests: _selectedInterests,
           onInterestsChanged: (interests) => setState(() {
@@ -441,7 +465,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             _selectedInterests.addAll(interests);
           }),
         );
-      case 2:
+      case 3:
         return OnboardingStep3Widget(
           city: _city,
           stateRegion: _stateRegion,
@@ -474,7 +498,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             _locationPermissionGranted = location.locationPermissionGranted;
           }),
         );
-      case 3:
+      case 4:
         return OnboardingStep4Widget(
           videoUrl: _profileVideoUrl,
           onVideoRecorded: (url) => setState(() => _profileVideoUrl = url),
@@ -486,6 +510,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   Widget _buildCTAButton() {
     final labels = [
+      'Continue',
       'Continue',
       'Continue',
       'Continue',

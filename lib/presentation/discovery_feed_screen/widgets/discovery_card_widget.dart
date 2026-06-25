@@ -8,6 +8,7 @@ import '../../../widgets/status_badge_widget.dart';
 import '../../../widgets/user_safety_actions.dart';
 import '../../../services/external_return_repair_service.dart';
 import '../../../services/presence_service.dart';
+import '../../../services/supabase_service.dart';
 import '../../../services/video_repair_service.dart';
 
 class DiscoveryCardWidget extends StatefulWidget {
@@ -22,6 +23,7 @@ class DiscoveryCardWidget extends StatefulWidget {
   final bool isOnline;
   final String? lastSeenAt;
   final String? videoPrompt;
+  final String connectionIntent;
   final VoidCallback onSpark;
   final VoidCallback onSkip;
   final VoidCallback? onReported;
@@ -40,6 +42,7 @@ class DiscoveryCardWidget extends StatefulWidget {
     required this.isOnline,
     this.lastSeenAt,
     this.videoPrompt,
+    required this.connectionIntent,
     required this.onSpark,
     required this.onSkip,
     this.onReported,
@@ -584,6 +587,13 @@ class _DiscoveryCardWidgetState extends State<DiscoveryCardWidget>
                                 ],
                               ),
                               const SizedBox(height: 10),
+                              _ConnectionIntentChip(
+                                label:
+                                    SupabaseService.connectionIntentCardLabel(
+                                      widget.connectionIntent,
+                                    ),
+                              ),
+                              const SizedBox(height: 10),
                               Text(
                                 widget.bio,
                                 style: GoogleFonts.dmSans(
@@ -922,6 +932,43 @@ class _InterestChip extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ConnectionIntentChip extends StatelessWidget {
+  final String label;
+
+  const _ConnectionIntentChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0x26E8503A),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x66E8503A)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            color: AppTheme.primary,
+            size: 13,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
     );
   }

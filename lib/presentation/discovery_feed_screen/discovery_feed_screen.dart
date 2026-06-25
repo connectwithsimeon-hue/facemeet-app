@@ -30,6 +30,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
   bool _isLoading = true;
   List<Map<String, dynamic>> _profiles = [];
   bool _hasUpcomingEvents = false;
+  String _selectedIntentFilter = 'all';
 
   late AnimationController _cardController;
   late Animation<Offset> _cardSlide;
@@ -59,7 +60,9 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     setState(() => _isLoading = true);
     try {
       final results = await Future.wait([
-        SupabaseService.instance.getDiscoveryFeed(),
+        SupabaseService.instance.getDiscoveryFeed(
+          connectionIntentFilter: _selectedIntentFilter,
+        ),
         SupabaseService.instance.getMyAccessibleEvents(),
       ]);
       final profiles = List<Map<String, dynamic>>.from(results[0] as List);
@@ -480,6 +483,16 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     }
   }
 
+  void _changeIntentFilter(String value) {
+    if (_selectedIntentFilter == value) return;
+    setState(() {
+      _selectedIntentFilter = value;
+      _currentCardIndex = 0;
+    });
+    _cardController.reset();
+    _loadProfiles();
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -618,6 +631,8 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        _buildIntentFilterRow(),
         const SizedBox(height: 12),
         if (_hasUpcomingEvents) ...[
           Padding(
@@ -795,10 +810,89 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
               isOnline: profile['is_online'] as bool? ?? false,
               lastSeenAt: profile['last_seen_at'] as String?,
               videoPrompt: profile['video_prompt'] as String?,
+              connectionIntent:
+                  profile['connection_intent'] as String? ??
+                  SupabaseService.defaultConnectionIntent,
               onSpark: _handleSpark,
               onSkip: _handleSkip,
               onBlocked: () => _removeBlockedProfile(profileId),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntentFilterRow() {
+    const filters = [
+      _IntentFilterOption(value: 'all', label: 'All'),
+      _IntentFilterOption(value: 'dating', label: 'Dating'),
+      _IntentFilterOption(value: 'friendship', label: 'Friendship'),
+      _IntentFilterOption(
+        value: 'professional',
+        label: 'Professional Connections',
+      ),
+      _IntentFilterOption(value: 'events', label: 'Events'),
+    ];
+
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        scrollDirection: Axis.horizontal,
+        itemBuilder: (context, index) {
+          final filter = filters[index];
+          return _IntentFilterChip(
+            label: filter.label,
+            isSelected: _selectedIntentFilter == filter.value,
+            onTap: () => _changeIntentFilter(filter.value),
+          );
+        },
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemCount: filters.length,
+      ),
+    );
+  }
+}
+
+class _IntentFilterOption {
+  final String value;
+  final String label;
+
+  const _IntentFilterOption({required this.value, required this.label});
+}
+
+class _IntentFilterChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _IntentFilterChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary : AppTheme.surfaceGlass,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : AppTheme.borderGlass,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: isSelected ? Colors.white : AppTheme.textSecondary,
           ),
         ),
       ),

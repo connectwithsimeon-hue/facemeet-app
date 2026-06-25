@@ -181,6 +181,46 @@ class SupabaseService {
   // USERS (PROFILES)
   // ============================================================
 
+  static const String defaultConnectionIntent = 'dating';
+
+  static const Set<String> connectionIntentValues = {
+    'dating',
+    'friendship',
+    'professional',
+    'events',
+    'open_to_all',
+  };
+
+  static String normalizeConnectionIntent(String? value) {
+    final normalized = value?.trim().toLowerCase();
+    if (normalized != null && connectionIntentValues.contains(normalized)) {
+      return normalized;
+    }
+    return defaultConnectionIntent;
+  }
+
+  static String connectionIntentLabel(String? value) {
+    switch (normalizeConnectionIntent(value)) {
+      case 'friendship':
+        return 'Friendship';
+      case 'professional':
+        return 'Professional Connections';
+      case 'events':
+        return 'Events';
+      case 'open_to_all':
+        return 'Open to All';
+      case 'dating':
+      default:
+        return 'Dating';
+    }
+  }
+
+  static String connectionIntentCardLabel(String? value) {
+    final normalized = normalizeConnectionIntent(value);
+    if (normalized == 'open_to_all') return 'Open to All';
+    return 'Open to ${connectionIntentLabel(normalized)}';
+  }
+
   /// Get current user's profile
   Future<Map<String, dynamic>?> getCurrentUserProfile() async {
     final uid = currentUserId;
@@ -403,14 +443,19 @@ class SupabaseService {
   }
 
   /// Get discovery feed ranked and filtered server-side.
-  Future<List<Map<String, dynamic>>> getDiscoveryFeed() async {
+  Future<List<Map<String, dynamic>>> getDiscoveryFeed({
+    String connectionIntentFilter = 'all',
+  }) async {
     final uid = currentUserId;
     if (uid == null) return [];
     await ensureCurrentUserInitialized();
 
     final response = await client.rpc(
       'get_discovery_feed',
-      params: {'p_limit': 20},
+      params: {
+        'p_limit': 20,
+        'p_connection_intent_filter': connectionIntentFilter,
+      },
     );
     final profiles = List<Map<String, dynamic>>.from(
       response as List? ?? const [],
