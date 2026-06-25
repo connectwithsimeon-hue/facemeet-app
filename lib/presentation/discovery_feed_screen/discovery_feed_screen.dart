@@ -31,6 +31,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
   List<Map<String, dynamic>> _profiles = [];
   bool _hasUpcomingEvents = false;
   String _selectedIntentFilter = 'all';
+  String _viewerConnectionIntent = SupabaseService.defaultConnectionIntent;
 
   late AnimationController _cardController;
   late Animation<Offset> _cardSlide;
@@ -59,9 +60,21 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
   Future<void> _loadProfiles() async {
     setState(() => _isLoading = true);
     try {
+      final currentProfile = await SupabaseService.instance
+          .getCurrentUserProfile();
+      final viewerIntent = SupabaseService.normalizeConnectionIntent(
+        currentProfile?['connection_intent'] as String?,
+      );
+      final nextSelectedFilter =
+          _isFilterAllowedForViewer(_selectedIntentFilter, viewerIntent)
+          ? _selectedIntentFilter
+          : 'all';
       final results = await Future.wait([
         SupabaseService.instance.getDiscoveryFeed(
-          connectionIntentFilter: _selectedIntentFilter,
+          connectionIntentFilter: _effectiveIntentFilterForViewer(
+            nextSelectedFilter,
+            viewerIntent,
+          ),
         ),
         SupabaseService.instance.getMyAccessibleEvents(),
       ]);
@@ -71,6 +84,8 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         setState(() {
           _profiles = profiles;
           _hasUpcomingEvents = events.isNotEmpty;
+          _viewerConnectionIntent = viewerIntent;
+          _selectedIntentFilter = nextSelectedFilter;
           _currentCardIndex = 0;
           _isLoading = false;
         });
@@ -485,6 +500,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
   void _changeIntentFilter(String value) {
     if (_selectedIntentFilter == value) return;
+    if (!_isFilterAllowedForViewer(value, _viewerConnectionIntent)) return;
     setState(() {
       _selectedIntentFilter = value;
       _currentCardIndex = 0;
@@ -824,16 +840,11 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
   }
 
   Widget _buildIntentFilterRow() {
-    const filters = [
-      _IntentFilterOption(value: 'all', label: 'All'),
-      _IntentFilterOption(value: 'dating', label: 'Dating'),
-      _IntentFilterOption(value: 'friendship', label: 'Friendship'),
-      _IntentFilterOption(
-        value: 'professional',
-        label: 'Professional Connections',
-      ),
-      _IntentFilterOption(value: 'events', label: 'Events'),
-    ];
+    final filters = _availableIntentFiltersForViewer(_viewerConnectionIntent);
+
+    if (filters.length <= 1) {
+      return const SizedBox.shrink();
+    }
 
     return SizedBox(
       height: 38,
@@ -852,6 +863,45 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         itemCount: filters.length,
       ),
     );
+  }
+
+  List<_IntentFilterOption> _availableIntentFiltersForViewer(
+    String? viewerIntent,
+  ) {
+    final normalized = SupabaseService.normalizeConnectionIntent(viewerIntent);
+    const allFilters = [
+      _IntentFilterOption(value: 'all', label: 'All'),
+      _IntentFilterOption(value: 'dating', label: 'Dating'),
+      _IntentFilterOption(value: 'friendship', label: 'Friendship'),
+      _IntentFilterOption(
+        value: 'professional',
+        label: 'Professional Connections',
+      ),
+      _IntentFilterOption(value: 'events', label: 'Events'),
+    ];
+
+    if (normalized == 'open_to_all') return allFilters;
+
+    return allFilters
+        .where((filter) {
+          return filter.value == 'all' || filter.value == normalized;
+        })
+        .toList(growable: false);
+  }
+
+  bool _isFilterAllowedForViewer(String filter, String? viewerIntent) {
+    return _availableIntentFiltersForViewer(
+      viewerIntent,
+    ).any((option) => option.value == filter);
+  }
+
+  String _effectiveIntentFilterForViewer(
+    String selectedFilter,
+    String? viewerIntent,
+  ) {
+    final normalized = SupabaseService.normalizeConnectionIntent(viewerIntent);
+    if (selectedFilter != 'all') return selectedFilter;
+    return normalized == 'open_to_all' ? 'all' : normalized;
   }
 }
 
