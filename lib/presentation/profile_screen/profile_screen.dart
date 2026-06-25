@@ -39,6 +39,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String _editBio = '';
   List<String> _editInterests = [];
+  String _editConnectionIntent = SupabaseService.defaultConnectionIntent;
 
   late Future<Map<String, dynamic>?> _profileFuture;
 
@@ -81,6 +82,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (data != null) {
       _editBio = data['bio'] ?? '';
       _editInterests = _parseInterests(data['interests']);
+      _editConnectionIntent = SupabaseService.normalizeConnectionIntent(
+        data['connection_intent'] as String?,
+      );
     }
     return data;
   }
@@ -241,12 +245,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await SupabaseService.instance.updateUserProfile({
           'bio': _editBio,
           'interests': _editInterests,
+          'connection_intent': SupabaseService.normalizeConnectionIntent(
+            _editConnectionIntent,
+          ),
         });
       }
       if (mounted) {
         setState(() {
           profile['bio'] = _editBio;
           profile['interests'] = List<String>.from(_editInterests);
+          profile['connection_intent'] =
+              SupabaseService.normalizeConnectionIntent(_editConnectionIntent);
           _isEditing = false;
           _isSaving = false;
         });
@@ -280,6 +289,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {
       _editBio = profile['bio'] ?? '';
       _editInterests = _parseInterests(profile['interests']);
+      _editConnectionIntent = SupabaseService.normalizeConnectionIntent(
+        profile['connection_intent'] as String?,
+      );
       _isEditing = false;
     });
   }
@@ -940,6 +952,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
             isEditing: _isEditing,
             onChanged: (interests) =>
                 setState(() => _editInterests = interests),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          title: 'What are you open to?',
+          child: _ConnectionIntentEditor(
+            value: _editConnectionIntent,
+            isEditing: _isEditing,
+            onChanged: (value) {
+              setState(() => _editConnectionIntent = value);
+            },
           ),
         ),
         const SizedBox(height: 16),
@@ -2349,6 +2372,101 @@ class _SectionCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ConnectionIntentEditor extends StatelessWidget {
+  final String value;
+  final bool isEditing;
+  final ValueChanged<String> onChanged;
+
+  const _ConnectionIntentEditor({
+    required this.value,
+    required this.isEditing,
+    required this.onChanged,
+  });
+
+  static const _options = [
+    _ConnectionIntentOption(value: 'dating', label: 'Dating'),
+    _ConnectionIntentOption(value: 'friendship', label: 'Friendship'),
+    _ConnectionIntentOption(
+      value: 'professional',
+      label: 'Professional Connections',
+    ),
+    _ConnectionIntentOption(value: 'events', label: 'Events'),
+    _ConnectionIntentOption(value: 'open_to_all', label: 'Open to All'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = SupabaseService.normalizeConnectionIntent(value);
+
+    if (!isEditing) {
+      return Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: AppTheme.primary.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Text(
+              SupabaseService.connectionIntentLabel(normalized),
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _options
+          .map((option) {
+            final isSelected = option.value == normalized;
+            return GestureDetector(
+              onTap: () => onChanged(option.value),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.primary : AppTheme.surfaceGlass,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: isSelected ? AppTheme.primary : AppTheme.borderGlass,
+                  ),
+                ),
+                child: Text(
+                  option.label,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: isSelected ? Colors.white : AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            );
+          })
+          .toList(growable: false),
+    );
+  }
+}
+
+class _ConnectionIntentOption {
+  final String value;
+  final String label;
+
+  const _ConnectionIntentOption({required this.value, required this.label});
 }
 
 class _SettingsRow extends StatelessWidget {
