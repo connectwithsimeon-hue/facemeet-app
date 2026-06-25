@@ -221,6 +221,50 @@ class SupabaseService {
     return 'Open to ${connectionIntentLabel(normalized)}';
   }
 
+  static const Set<String> sparkTypeValues = {
+    'dating',
+    'friendship',
+    'professional',
+    'event',
+  };
+
+  static String normalizeSparkType(String? value) {
+    final normalized = value?.trim().toLowerCase();
+    if (normalized != null && sparkTypeValues.contains(normalized)) {
+      return normalized;
+    }
+    return 'dating';
+  }
+
+  static String sparkTypeForConnectionIntent(String? value) {
+    switch (normalizeConnectionIntent(value)) {
+      case 'friendship':
+        return 'friendship';
+      case 'professional':
+        return 'professional';
+      case 'events':
+        return 'event';
+      case 'open_to_all':
+      case 'dating':
+      default:
+        return 'dating';
+    }
+  }
+
+  static String sparkTypeLabel(String? value) {
+    switch (normalizeSparkType(value)) {
+      case 'friendship':
+        return 'Friendship Spark';
+      case 'professional':
+        return 'Professional Connection Spark';
+      case 'event':
+        return 'Event Spark';
+      case 'dating':
+      default:
+        return 'Dating Spark';
+    }
+  }
+
   /// Get current user's profile
   Future<Map<String, dynamic>?> getCurrentUserProfile() async {
     final uid = currentUserId;
@@ -863,6 +907,7 @@ class SupabaseService {
   Future<Map<String, dynamic>?> saveInteraction({
     required String toUserId,
     required String actionType, // 'spark' or 'skip'
+    String? sparkType,
   }) async {
     final uid = currentUserId;
     if (uid == null) return null;
@@ -884,13 +929,16 @@ class SupabaseService {
       return null;
     }
 
+    final payload = {
+      'from_user_id': uid,
+      'to_user_id': toUserId,
+      'action_type': actionType,
+      if (actionType == 'spark') 'spark_type': normalizeSparkType(sparkType),
+    };
+
     final response = await client
         .from('interactions')
-        .insert({
-          'from_user_id': uid,
-          'to_user_id': toUserId,
-          'action_type': actionType,
-        })
+        .insert(payload)
         .select()
         .single();
 

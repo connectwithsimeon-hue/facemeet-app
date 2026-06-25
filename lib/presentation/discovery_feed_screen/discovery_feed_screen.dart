@@ -260,8 +260,14 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     }
 
     final currentUid = SupabaseService.instance.currentUserId;
+    final sparkType = await _resolveSparkTypeForViewer();
+    if (sparkType == null) {
+      debugPrint('DISCOVERY_SPARK: spark type selection cancelled');
+      return;
+    }
+    final sparkLabel = SupabaseService.sparkTypeLabel(sparkType);
     debugPrint(
-      'DISCOVERY_SPARK: from_user_id=$currentUid, to_user_id=$uid, action_type=spark',
+      'DISCOVERY_SPARK: from_user_id=$currentUid, to_user_id=$uid, action_type=spark, spark_type=$sparkType',
     );
     debugPrint('SPARK SESSION: user sparked — toUserId=$uid');
 
@@ -271,6 +277,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       insertedRow = await SupabaseService.instance.saveInteraction(
         toUserId: uid,
         actionType: 'spark',
+        sparkType: sparkType,
       );
       if (insertedRow == null) {
         debugPrint(
@@ -307,9 +314,9 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       _sendPushNotification(
         userId: uid,
         type: 'new_spark',
-        title: 'Someone Sparked you ⚡',
-        body: 'Open FaceMeet to see who felt a spark.',
-        data: {'type': 'new_spark', 'url': '/'},
+        title: 'You received a $sparkLabel',
+        body: 'Open FaceMeet to see who connected with your profile.',
+        data: {'type': 'new_spark', 'url': '/', 'spark_type': sparkType},
       ),
     );
 
@@ -420,6 +427,20 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
     // Step 3 — Advance only after insert + reciprocal check completed
     _advanceCard();
+  }
+
+  Future<String?> _resolveSparkTypeForViewer() async {
+    final viewerIntent = SupabaseService.normalizeConnectionIntent(
+      _viewerConnectionIntent,
+    );
+    if (viewerIntent != 'open_to_all') {
+      return SupabaseService.sparkTypeForConnectionIntent(viewerIntent);
+    }
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _SparkTypeSelectorSheet(),
+    );
   }
 
   void _showMutualSparkPrompt({
@@ -903,6 +924,102 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     if (selectedFilter != 'all') return selectedFilter;
     return normalized == 'open_to_all' ? 'all' : normalized;
   }
+}
+
+class _SparkTypeSelectorSheet extends StatelessWidget {
+  const _SparkTypeSelectorSheet();
+
+  static const _options = [
+    _SparkTypeOption(value: 'dating', label: 'Dating Spark'),
+    _SparkTypeOption(value: 'friendship', label: 'Friendship Spark'),
+    _SparkTypeOption(
+      value: 'professional',
+      label: 'Professional Connection Spark',
+    ),
+    _SparkTypeOption(value: 'event', label: 'Event Spark'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF17171F),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppTheme.borderGlass),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 30,
+              offset: Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'What kind of Spark?',
+              style: GoogleFonts.dmSans(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Choose the connection context for this Spark.',
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ..._options.map((option) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => Navigator.of(context).pop(option.value),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceGlass,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.borderGlass),
+                    ),
+                    child: Text(
+                      option.label,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SparkTypeOption {
+  final String value;
+  final String label;
+
+  const _SparkTypeOption({required this.value, required this.label});
 }
 
 class _IntentFilterOption {
