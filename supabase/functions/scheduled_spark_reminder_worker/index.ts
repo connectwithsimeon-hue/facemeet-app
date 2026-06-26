@@ -28,6 +28,16 @@ type PushResult = {
   reason: string;
 };
 
+type WorkerLogSummary = {
+  reminderDue: number;
+  joinReadyDue: number;
+  reminderClaimed: number;
+  joinReadyClaimed: number;
+  notificationAttempts: number;
+  notificationFailures: number;
+  failureReasons: Record<string, number>;
+};
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -134,11 +144,38 @@ async function sendPush(
   });
 
   const payload = await response.json().catch(() => ({}));
+  const reason = response.ok ? String(payload?.reason ?? "unknown") : "send_failed";
+  if (!response.ok || Number(payload?.sent ?? 0) <= 0) {
+    console.log("Scheduled Spark push attempt did not send:", {
+      type,
+      schedule: shortId(schedule.id),
+      user: shortId(userId),
+      reason,
+    });
+  }
   return {
     user_id_short: shortId(userId),
     sent: Number(payload?.sent ?? 0),
-    reason: response.ok ? String(payload?.reason ?? "unknown") : "send_failed",
+    reason,
   };
+}
+
+function summarizeFailures(results: Array<{ push_results: PushResult[] }>) {
+  const failureReasons: Record<string, number> = {};
+  let attempts = 0;
+  let failures = 0;
+
+  for (const result of results) {
+    for (const push of result.push_results) {
+      attempts += 1;
+      if (push.sent <= 0) {
+        failures += 1;
+        failureReasons[push.reason] = (failureReasons[push.reason] ?? 0) + 1;
+      }
+    }
+  }
+
+  return { attempts, failures, failureReasons };
 }
 
 async function claimReminder(
@@ -229,6 +266,7 @@ async function processReminderCandidates(
     candidate_count: data?.length ?? 0,
     claimed_count: results.length,
     results,
+    diagnostics: summarizeFailures(results),
   };
 }
 
@@ -284,6 +322,7 @@ async function processJoinReadyCandidates(
     candidate_count: data?.length ?? 0,
     claimed_count: results.length,
     results,
+    diagnostics: summarizeFailures(results),
   };
 }
 
@@ -313,9 +352,36 @@ serve(async (req) => {
     const reminder = await processReminderCandidates(supabase, dryRun);
     const joinReady = await processJoinReadyCandidates(supabase, dryRun);
 
+    const failureReasons = {
+      ...reminder.diagnostics.failureReasons,
+      ...Object.fromEntries(
+        Object.entries(joinReady.diagnostics.failureReasons).map(([key, value]) => [
+          key,
+          (reminder.diagnostics.failureReasons[key] ?? 0) + value,
+        ]),
+      ),
+    };
+    const summary: WorkerLogSummary = {
+      reminderDue: reminder.candidate_count,
+      joinReadyDue: joinReady.candidate_count,
+      reminderClaimed: reminder.claimed_count,
+      joinReadyClaimed: joinReady.claimed_count,
+      notificationAttempts:
+        reminder.diagnostics.attempts + joinReady.diagnostics.attempts,
+      notificationFailures:
+        reminder.diagnostics.failures + joinReady.diagnostics.failures,
+      failureReasons,
+    };
+
+    console.log("Scheduled Spark reminder worker summary:", {
+      dryRun,
+      ...summary,
+    });
+
     return jsonResponse({
       success: true,
       dry_run: dryRun,
+      diagnostics: summary,
       reminder,
       join_ready: joinReady,
     });

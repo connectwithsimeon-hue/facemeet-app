@@ -235,6 +235,10 @@ class SparksScreenState extends State<SparksScreen>
       }
       final match = await SupabaseService.instance.getMatch(matchId);
       if (match == null) continue;
+      final matchStatus = match['status']?.toString().trim().toLowerCase();
+      if (matchStatus == 'chat_unlocked' || matchStatus == 'session_ended') {
+        continue;
+      }
       enriched.add({...schedule, 'other_user': profile ?? {}, 'match': match});
     }
     return enriched;
@@ -806,6 +810,8 @@ class _ScheduledIntroCard extends StatelessWidget {
     final city = other['city'] as String? ?? '';
     final thumbnailUrl = other['thumbnail_url'] as String?;
     final status = schedule['status'] as String? ?? 'proposed';
+    final match = schedule['match'] as Map<String, dynamic>? ?? {};
+    final matchStatus = match['status']?.toString().trim().toLowerCase() ?? '';
     final sparkType = SupabaseService.sparkTypeLabel(
       schedule['spark_type'] as String?,
     );
@@ -816,6 +822,11 @@ class _ScheduledIntroCard extends StatelessWidget {
     final proposedTimes = _proposedTimes(schedule);
     final acceptedTime = _acceptedTime(schedule);
     final canJoin = acceptedTime != null && _canJoin(acceptedTime);
+    final isCompleted =
+        status == 'completed' ||
+        matchStatus == 'chat_unlocked' ||
+        matchStatus == 'session_ended' ||
+        schedule['completed_at'] != null;
     final primaryTime =
         acceptedTime ?? (proposedTimes.isNotEmpty ? proposedTimes.first : null);
 
@@ -939,7 +950,16 @@ class _ScheduledIntroCard extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 14),
-                  if (status == 'accepted') ...[
+                  if (isCompleted) ...[
+                    Text(
+                      'This intro is complete. Your Messages section is ready when chat unlocks.',
+                      style: GoogleFonts.dmSans(
+                        color: AppTheme.textMuted,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ] else if (status == 'accepted') ...[
                     _ActionButton(
                       label: canJoin
                           ? 'Join 3-minute intro'

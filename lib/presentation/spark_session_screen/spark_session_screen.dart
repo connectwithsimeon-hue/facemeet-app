@@ -777,6 +777,9 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
                   .update({'status': matchStatus, 'current_session_key': null})
                   .eq('id', matchId);
 
+              await SupabaseService.instance
+                  .completeSparkSessionScheduleForMatch(matchId);
+
               // If mutual spark, navigate directly to chat thread
               if (mutual && mounted) {
                 debugPrint(

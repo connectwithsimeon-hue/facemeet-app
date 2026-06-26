@@ -1214,6 +1214,14 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map);
   }
 
+  Future<int> completeSparkSessionScheduleForMatch(String matchId) async {
+    final response = await client.rpc(
+      'complete_spark_session_schedule_for_match',
+      params: {'p_match_id': matchId},
+    );
+    return (response as num?)?.toInt() ?? 0;
+  }
+
   List<String> _scheduleTimesPayload(List<DateTime> proposedTimes) {
     final sorted = proposedTimes.map((time) => time.toUtc()).toSet().toList()
       ..sort();
@@ -1456,6 +1464,8 @@ class SupabaseService {
           .from('matches')
           .update({'status': matchStatus, 'current_session_key': null})
           .eq('id', matchId);
+
+      await completeSparkSessionScheduleForMatch(matchId);
     }
   }
 
