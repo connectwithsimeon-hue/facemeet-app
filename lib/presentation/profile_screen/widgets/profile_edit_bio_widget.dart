@@ -7,12 +7,14 @@ class ProfileEditBioWidget extends StatefulWidget {
   final String bio;
   final bool isEditing;
   final ValueChanged<String> onChanged;
+  final FocusNode? focusNode;
 
   const ProfileEditBioWidget({
     super.key,
     required this.bio,
     required this.isEditing,
     required this.onChanged,
+    this.focusNode,
   });
 
   @override
@@ -51,6 +53,7 @@ class _ProfileEditBioWidgetState extends State<ProfileEditBioWidget> {
           filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
           child: TextField(
             controller: _ctrl,
+            focusNode: widget.focusNode,
             maxLines: 4,
             maxLength: 200,
             onChanged: widget.onChanged,

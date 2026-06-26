@@ -30,16 +30,18 @@ class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  State<ProfileScreen> createState() => ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class ProfileScreenState extends State<ProfileScreen> {
   bool _isEditing = false;
   bool _isSaving = false;
 
   String _editBio = '';
   List<String> _editInterests = [];
   String _editConnectionIntent = SupabaseService.defaultConnectionIntent;
+  final FocusNode _bioFocusNode = FocusNode();
+  final GlobalKey _aboutMeSectionKey = GlobalKey();
 
   late Future<Map<String, dynamic>?> _profileFuture;
 
@@ -71,6 +73,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    _bioFocusNode.dispose();
     _matchesRealtimeChannel?.unsubscribe();
     super.dispose();
   }
@@ -235,6 +238,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } else {
       setState(() => _isEditing = true);
     }
+  }
+
+  void openAboutMeEditor() {
+    setState(() => _isEditing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final sectionContext = _aboutMeSectionKey.currentContext;
+      if (sectionContext != null) {
+        Scrollable.ensureVisible(
+          sectionContext,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          alignment: 0.18,
+        );
+      }
+      _bioFocusNode.requestFocus();
+    });
   }
 
   Future<void> _saveProfile(Map<String, dynamic> profile) async {
@@ -878,70 +898,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _buildInviteFriendsCard(),
         const SizedBox(height: 20),
 
-        _SectionCard(
-          title: 'About me',
-          trailing: _isEditing
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GestureDetector(
-                      onTap: () => _cancelEdit(profile),
-                      child: Text(
-                        'Cancel',
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          color: AppTheme.textMuted,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: _isSaving ? null : () => _toggleEdit(profile),
-                      child: _isSaving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                color: AppTheme.primary,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : Text(
-                              'Save',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                    ),
-                  ],
-                )
-              : GestureDetector(
-                  onTap: () => _toggleEdit(profile),
-                  child: Row(
+        KeyedSubtree(
+          key: _aboutMeSectionKey,
+          child: _SectionCard(
+            title: 'About me',
+            trailing: _isEditing
+                ? Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.edit_rounded,
-                        color: AppTheme.textMuted,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Edit',
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          color: AppTheme.textMuted,
+                      GestureDetector(
+                        onTap: () => _cancelEdit(profile),
+                        child: Text(
+                          'Cancel',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 13,
+                            color: AppTheme.textMuted,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: _isSaving ? null : () => _toggleEdit(profile),
+                        child: _isSaving
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  color: AppTheme.primary,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                'Save',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                      ),
                     ],
+                  )
+                : GestureDetector(
+                    onTap: () => _toggleEdit(profile),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.edit_rounded,
+                          color: AppTheme.textMuted,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Edit',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 13,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-          child: ProfileEditBioWidget(
-            bio: _editBio,
-            isEditing: _isEditing,
-            onChanged: (v) => _editBio = v,
+            child: ProfileEditBioWidget(
+              bio: _editBio,
+              isEditing: _isEditing,
+              focusNode: _bioFocusNode,
+              onChanged: (v) => _editBio = v,
+            ),
           ),
         ),
         const SizedBox(height: 16),

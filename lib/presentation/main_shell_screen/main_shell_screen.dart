@@ -38,11 +38,15 @@ class MainShellScreen extends StatefulWidget {
 }
 
 class MainShellScreenState extends State<MainShellScreen> {
+  static String? _aboutMeReminderShownForUserId;
+
   late int _currentIndex;
 
   final GlobalKey<ChatScreenState> _chatKey = GlobalKey<ChatScreenState>();
   final GlobalKey<SparksScreenState> _sparksKey =
       GlobalKey<SparksScreenState>();
+  final GlobalKey<ProfileScreenState> _profileKey =
+      GlobalKey<ProfileScreenState>();
 
   late final List<Widget> _tabs = [
     const DiscoveryFeedScreen(),
@@ -56,7 +60,7 @@ class MainShellScreenState extends State<MainShellScreen> {
       initialMatchId: widget.chatMatchId,
       initialOtherUser: widget.chatOtherUser,
     ),
-    const ProfileScreen(),
+    ProfileScreen(key: _profileKey),
   ];
 
   // Realtime subscription for new mutual matches (legacy — kept for reconnect watcher)
@@ -114,6 +118,7 @@ class MainShellScreenState extends State<MainShellScreen> {
         });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerVideoRepair('main-shell-visible');
+      _maybeShowAboutMeReminder();
     });
     Future.delayed(const Duration(milliseconds: 450), () {
       _triggerVideoRepair('main-shell-init-delay');
@@ -125,6 +130,167 @@ class MainShellScreenState extends State<MainShellScreen> {
     if (_currentIndex == discoverTabIndex || _currentIndex == profileTabIndex) {
       VideoRepairService.trigger(source);
     }
+  }
+
+  Future<void> _maybeShowAboutMeReminder() async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null || _aboutMeReminderShownForUserId == uid || !mounted) {
+      return;
+    }
+
+    try {
+      final profile = await SupabaseService.instance.getCurrentUserProfile();
+      final bio = profile?['bio']?.toString().trim() ?? '';
+      if (bio.isNotEmpty || !mounted) return;
+
+      _aboutMeReminderShownForUserId = uid;
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+      if (!mounted) return;
+      _showAboutMeReminderSheet();
+    } catch (e) {
+      debugPrint('ABOUT ME REMINDER: profile check skipped — $e');
+    }
+  }
+
+  void _showAboutMeReminderSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF161622).withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppTheme.borderGlass),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x66000000),
+                        blurRadius: 28,
+                        offset: Offset(0, 14),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.edit_note_rounded,
+                              color: AppTheme.primary,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Complete your About Me',
+                              style: GoogleFonts.outfit(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Tell people a little about yourself so your profile feels more real and complete.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          height: 1.45,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppTheme.textMuted,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: Text(
+                                'Later',
+                                style: GoogleFonts.dmSans(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.pop(sheetContext);
+                                _openAboutMeEditor();
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primary,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: Text(
+                                'Add About Me',
+                                style: GoogleFonts.dmSans(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openAboutMeEditor() {
+    if (_currentIndex != profileTabIndex) {
+      setState(() => _currentIndex = profileTabIndex);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _profileKey.currentState?.openAboutMeEditor();
+    });
   }
 
   // ── Notification service ────────────────────────────────────────────────────
