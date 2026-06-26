@@ -160,9 +160,20 @@ class _SplashScreenState extends State<SplashScreen>
       try {
         final isComplete = await SupabaseService.instance
             .isOnboardingComplete();
+        final professionalSparkSenderId = _professionalSparkSenderFromUrl(
+          Uri.base,
+        );
         final route = AppRoutes.routeAfterAuth(onboardingComplete: isComplete);
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
+          if (isComplete && professionalSparkSenderId != null) {
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.professionalSparkRevealScreen,
+              (r) => false,
+              arguments: {'senderUserId': professionalSparkSenderId},
+            );
+          } else {
+            Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
+          }
         }
       } catch (e) {
         debugPrint('SPLASH: Onboarding check failed, routing to home: $e');
@@ -209,6 +220,19 @@ class _SplashScreenState extends State<SplashScreen>
         }
       }
     }
+  }
+
+  String? _professionalSparkSenderFromUrl(Uri uri) {
+    final pushType = uri.queryParameters['push_type'];
+    final sparkType = uri.queryParameters['spark_type'];
+    final senderUserId = uri.queryParameters['sender_user_id']?.trim();
+    if (pushType == 'new_spark' &&
+        sparkType == 'professional' &&
+        senderUserId != null &&
+        senderUserId.isNotEmpty) {
+      return senderUserId;
+    }
+    return null;
   }
 
   @override

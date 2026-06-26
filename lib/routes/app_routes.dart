@@ -14,6 +14,7 @@ import '../presentation/profile_screen/profile_video_record_screen.dart';
 import '../presentation/debug_screen/push_notification_debug_screen.dart';
 import '../presentation/events_screen/events_screen.dart';
 import '../presentation/intro_carousel_screen/intro_carousel_screen.dart';
+import '../presentation/professional_spark_reveal_screen/professional_spark_reveal_screen.dart';
 import '../widgets/app_navigation.dart';
 
 class AppRoutes {
@@ -33,6 +34,8 @@ class AppRoutes {
   static const String profileScreen = '/profile-screen';
   static const String pricingScreen = '/pricing-screen';
   static const String eventsScreen = '/events-screen';
+  static const String professionalSparkRevealScreen =
+      '/professional-spark-reveal-screen';
   static const String profileVideoRecord = '/profile-video-record';
   static const String emailVerificationScreen = '/email-verification-screen';
   static const String pushNotificationDebug = '/push-notification-debug';
@@ -71,6 +74,14 @@ class AppRoutes {
         MainShellScreen(key: mainShellKey, initialIndex: profileTabIndex),
     pricingScreen: (context) => const PricingScreen(),
     eventsScreen: (context) => const EventsScreen(),
+    professionalSparkRevealScreen: (context) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      String? senderUserId;
+      if (args is Map<String, dynamic>) {
+        senderUserId = args['senderUserId'] as String?;
+      }
+      return ProfessionalSparkRevealScreen(senderUserId: senderUserId);
+    },
     profileVideoRecord: (context) => const ProfileVideoRecordScreen(),
     pushNotificationDebug: (context) => const PushNotificationDebugScreen(),
   };

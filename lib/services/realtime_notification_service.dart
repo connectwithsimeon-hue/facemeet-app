@@ -80,8 +80,24 @@ class RealtimeNotificationService {
 
             final fromUserId = record['from_user_id'] as String?;
             if (fromUserId == null) return;
+            final sparkType = SupabaseService.normalizeSparkType(
+              record['spark_type'] as String?,
+            );
 
             try {
+              if (sparkType != 'professional') {
+                _controller.add(
+                  NotificationEvent(
+                    type: NotificationEventType.sparkReceived,
+                    data: {'fromUserId': fromUserId, 'sparkType': sparkType},
+                  ),
+                );
+                debugPrint(
+                  '[RealtimeNotificationService] Private spark received',
+                );
+                return;
+              }
+
               final profile = await SupabaseService.instance.getUserProfile(
                 fromUserId,
               );
@@ -93,6 +109,7 @@ class RealtimeNotificationService {
                   type: NotificationEventType.sparkReceived,
                   data: {
                     'fromUserId': fromUserId,
+                    'sparkType': sparkType,
                     'name': name,
                     'thumbnailUrl': thumbnailUrl,
                   },

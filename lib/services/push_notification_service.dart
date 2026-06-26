@@ -559,6 +559,20 @@ class PushNotificationService {
         }
         break;
       case 'new_spark':
+        if (_isProfessionalSparkPayload(data)) {
+          final senderUserId = _sparkSenderUserId(data);
+          if (senderUserId != null && senderUserId.isNotEmpty) {
+            _log(
+              'SPARK PUSH: route target after professional spark tap — professionalSparkRevealScreen',
+            );
+            navigator.pushNamedAndRemoveUntil(
+              AppRoutes.professionalSparkRevealScreen,
+              (route) => false,
+              arguments: {'senderUserId': senderUserId},
+            );
+            break;
+          }
+        }
         final matchId = data['match_id'] as String?;
         if (matchId != null && matchId.isNotEmpty) {
           _log(
@@ -686,5 +700,22 @@ class PushNotificationService {
         normalized == 'event_approved' ||
         normalized == 'event_waitlisted' ||
         normalized == 'event_rejected';
+  }
+
+  bool _isProfessionalSparkPayload(Map<String, dynamic> data) {
+    final sparkType = data['spark_type']?.toString().trim().toLowerCase();
+    return sparkType == 'professional';
+  }
+
+  String? _sparkSenderUserId(Map<String, dynamic> data) {
+    for (final key in const [
+      'sender_user_id',
+      'from_user_id',
+      'professional_spark_sender_id',
+    ]) {
+      final value = data[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
   }
 }

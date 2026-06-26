@@ -265,7 +265,6 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       debugPrint('DISCOVERY_SPARK: spark type selection cancelled');
       return;
     }
-    final sparkLabel = SupabaseService.sparkTypeLabel(sparkType);
     debugPrint(
       'DISCOVERY_SPARK: from_user_id=$currentUid, to_user_id=$uid, action_type=spark, spark_type=$sparkType',
     );
@@ -305,18 +304,36 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
       return;
     }
 
-    // Step 1b — Send mystery spark notification to the sparked user
+    // Step 1b — Send spark notification to the sparked user.
+    // Professional Connection Sparks intentionally reveal the sender profile;
+    // Dating/Friendship Sparks keep the private mystery flow.
     debugPrint('SPARK PUSH: spark created');
     debugPrint(
       'SPARK PUSH: recipient user id present yes/no=${uid.isNotEmpty}',
     );
+    final isProfessionalSpark = sparkType == 'professional';
+    final professionalSenderName = isProfessionalSpark
+        ? await _currentUserFirstName()
+        : null;
     unawaited(
       _sendPushNotification(
         userId: uid,
         type: 'new_spark',
-        title: 'You received a $sparkLabel',
-        body: 'Open FaceMeet to see who connected with your profile.',
-        data: {'type': 'new_spark', 'url': '/', 'spark_type': sparkType},
+        title: isProfessionalSpark
+            ? 'Professional Connection Spark'
+            : 'Someone Sparked you ⚡',
+        body: isProfessionalSpark
+            ? '${professionalSenderName ?? 'Someone'} wants to connect professionally.'
+            : 'Open FaceMeet to see who felt a spark.',
+        data: {
+          'type': 'new_spark',
+          'url': isProfessionalSpark && currentUid != null
+              ? '/?push_type=new_spark&spark_type=professional&sender_user_id=$currentUid'
+              : '/',
+          'spark_type': sparkType,
+          if (isProfessionalSpark && currentUid != null)
+            'professional_spark_sender_id': currentUid,
+        },
       ),
     );
 
@@ -427,6 +444,16 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
     // Step 3 — Advance only after insert + reciprocal check completed
     _advanceCard();
+  }
+
+  Future<String?> _currentUserFirstName() async {
+    try {
+      final profile = await SupabaseService.instance.getCurrentUserProfile();
+      final firstName = profile?['first_name']?.toString().trim();
+      return firstName == null || firstName.isEmpty ? null : firstName;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _resolveSparkTypeForViewer() async {

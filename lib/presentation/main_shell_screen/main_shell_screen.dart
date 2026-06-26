@@ -167,15 +167,35 @@ class MainShellScreenState extends State<MainShellScreen> {
 
   // ── Spark banner ────────────────────────────────────────────────────────────
   void _showSparkBanner(Map<String, dynamic> data) {
-    final name = data['name'] as String? ?? 'Someone';
+    final sparkType = data['sparkType'] as String? ?? 'dating';
+    final isProfessionalSpark = sparkType == 'professional';
+    final name = isProfessionalSpark
+        ? data['name'] as String? ?? 'Someone'
+        : 'Someone';
     final thumbnailUrl = data['thumbnailUrl'] as String?;
     _showBanner(
-      title: '⚡ New Spark!',
-      message: '$name sparked you — check them out!',
-      thumbnailUrl: thumbnailUrl,
+      title: isProfessionalSpark
+          ? 'Professional Connection Spark'
+          : '⚡ New Spark!',
+      message: isProfessionalSpark
+          ? '$name wants to connect professionally.'
+          : 'Someone sparked you — open Discover to respond.',
+      thumbnailUrl: isProfessionalSpark ? thumbnailUrl : null,
       icon: Icons.bolt_rounded,
       accentColor: const Color(0xFFFFB800),
-      onTap: () => _onTap(discoverTabIndex), // Navigate to Discover tab
+      onTap: () {
+        final fromUserId = data['fromUserId'] as String?;
+        if (isProfessionalSpark &&
+            fromUserId != null &&
+            fromUserId.isNotEmpty) {
+          Navigator.of(context).pushNamed(
+            AppRoutes.professionalSparkRevealScreen,
+            arguments: {'senderUserId': fromUserId},
+          );
+          return;
+        }
+        _onTap(discoverTabIndex);
+      },
     );
   }
 

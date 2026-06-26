@@ -1,7 +1,7 @@
 name: facemeet
 description: A new Flutter project.
 publish_to: none
-version: 1.0.8+85
+version: 1.0.9+86
 
 environment:
   sdk: ^3.9.0
