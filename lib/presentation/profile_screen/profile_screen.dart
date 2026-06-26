@@ -2392,7 +2392,6 @@ class _ConnectionIntentEditor extends StatelessWidget {
       value: 'professional',
       label: 'Professional Connections',
     ),
-    _ConnectionIntentOption(value: 'events', label: 'Events'),
     _ConnectionIntentOption(value: 'open_to_all', label: 'Open to All'),
   ];
 

@@ -898,7 +898,6 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         value: 'professional',
         label: 'Professional Connections',
       ),
-      _IntentFilterOption(value: 'events', label: 'Events'),
     ];
 
     if (normalized == 'open_to_all') return allFilters;
@@ -936,7 +935,6 @@ class _SparkTypeSelectorSheet extends StatelessWidget {
       value: 'professional',
       label: 'Professional Connection Spark',
     ),
-    _SparkTypeOption(value: 'event', label: 'Event Spark'),
   ];
 
   @override

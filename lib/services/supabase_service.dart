@@ -187,12 +187,15 @@ class SupabaseService {
     'dating',
     'friendship',
     'professional',
+    // Kept for compatibility with older deployed clients. New app UI treats
+    // this as friendship and no longer creates it.
     'events',
     'open_to_all',
   };
 
   static String normalizeConnectionIntent(String? value) {
     final normalized = value?.trim().toLowerCase();
+    if (normalized == 'events') return 'friendship';
     if (normalized != null && connectionIntentValues.contains(normalized)) {
       return normalized;
     }
@@ -205,8 +208,6 @@ class SupabaseService {
         return 'Friendship';
       case 'professional':
         return 'Professional Connections';
-      case 'events':
-        return 'Events';
       case 'open_to_all':
         return 'Open to All';
       case 'dating':
@@ -225,11 +226,14 @@ class SupabaseService {
     'dating',
     'friendship',
     'professional',
+    // Kept for compatibility with older deployed clients. New app UI treats
+    // this as friendship and no longer creates it.
     'event',
   };
 
   static String normalizeSparkType(String? value) {
     final normalized = value?.trim().toLowerCase();
+    if (normalized == 'event') return 'friendship';
     if (normalized != null && sparkTypeValues.contains(normalized)) {
       return normalized;
     }
@@ -242,8 +246,6 @@ class SupabaseService {
         return 'friendship';
       case 'professional':
         return 'professional';
-      case 'events':
-        return 'event';
       case 'open_to_all':
       case 'dating':
       default:
@@ -257,8 +259,6 @@ class SupabaseService {
         return 'Friendship Spark';
       case 'professional':
         return 'Professional Connection Spark';
-      case 'event':
-        return 'Event Spark';
       case 'dating':
       default:
         return 'Dating Spark';

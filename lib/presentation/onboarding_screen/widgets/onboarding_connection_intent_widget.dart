@@ -36,12 +36,6 @@ class OnboardingConnectionIntentWidget extends StatelessWidget {
       icon: Icons.work_rounded,
     ),
     _ConnectionIntentOption(
-      value: 'events',
-      label: 'Events',
-      description: 'Discover curated FaceMeet experiences.',
-      icon: Icons.event_available_rounded,
-    ),
-    _ConnectionIntentOption(
       value: 'open_to_all',
       label: 'Open to All',
       description: 'Stay open to every kind of meaningful connection.',
