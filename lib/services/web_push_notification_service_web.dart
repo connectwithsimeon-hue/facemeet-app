@@ -413,6 +413,10 @@ class WebPushNotificationService {
     if (type != 'new_spark' &&
         type != 'new_match' &&
         type != 'spark_session' &&
+        type != 'spark_schedule_proposed' &&
+        type != 'spark_schedule_accepted' &&
+        type != 'spark_schedule_reminder' &&
+        type != 'spark_schedule_ready' &&
         type != 'chat_unlocked' &&
         type != 'new_message') {
       debugPrint('WEB PUSH: event wiring disabled in Phase 2E type=$type');

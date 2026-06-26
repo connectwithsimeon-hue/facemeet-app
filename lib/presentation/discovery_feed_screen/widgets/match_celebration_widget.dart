@@ -10,6 +10,7 @@ class MatchCelebrationWidget extends StatefulWidget {
   final String matchedUserId;
   final VoidCallback onDismiss;
   final VoidCallback onStartSession;
+  final VoidCallback onScheduleLater;
 
   const MatchCelebrationWidget({
     super.key,
@@ -17,6 +18,7 @@ class MatchCelebrationWidget extends StatefulWidget {
     required this.matchedUserId,
     required this.onDismiss,
     required this.onStartSession,
+    required this.onScheduleLater,
   });
 
   @override
@@ -239,7 +241,7 @@ class _MatchCelebrationWidgetState extends State<MatchCelebrationWidget>
                                     ),
                                     const SizedBox(width: 10),
                                     Text(
-                                      'Start Spark Session',
+                                      'Start 3-minute intro now',
                                       style: GoogleFonts.dmSans(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w700,
@@ -252,7 +254,45 @@ class _MatchCelebrationWidgetState extends State<MatchCelebrationWidget>
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: GestureDetector(
+                            onTap: widget.onScheduleLater,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.schedule_rounded,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Schedule for later',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         TextButton(
                           onPressed: widget.onDismiss,
                           child: Text(

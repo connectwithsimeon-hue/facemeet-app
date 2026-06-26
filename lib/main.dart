@@ -163,6 +163,7 @@ class _SplashScreenState extends State<SplashScreen>
         final professionalSparkSenderId = _professionalSparkSenderFromUrl(
           Uri.base,
         );
+        final routeOverride = _routeFromPushUrl(Uri.base);
         final route = AppRoutes.routeAfterAuth(onboardingComplete: isComplete);
         if (mounted) {
           if (isComplete && professionalSparkSenderId != null) {
@@ -171,6 +172,10 @@ class _SplashScreenState extends State<SplashScreen>
               (r) => false,
               arguments: {'senderUserId': professionalSparkSenderId},
             );
+          } else if (isComplete && routeOverride != null) {
+            Navigator.of(
+              context,
+            ).pushNamedAndRemoveUntil(routeOverride, (r) => false);
           } else {
             Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
           }
@@ -231,6 +236,20 @@ class _SplashScreenState extends State<SplashScreen>
         senderUserId != null &&
         senderUserId.isNotEmpty) {
       return senderUserId;
+    }
+    return null;
+  }
+
+  String? _routeFromPushUrl(Uri uri) {
+    final pushType = uri.queryParameters['push_type']
+        ?.trim()
+        .toLowerCase()
+        .replaceAll('-', '_');
+    if (pushType == 'spark_schedule_proposed' ||
+        pushType == 'spark_schedule_accepted' ||
+        pushType == 'spark_schedule_reminder' ||
+        pushType == 'spark_schedule_ready') {
+      return AppRoutes.sparksScreen;
     }
     return null;
   }

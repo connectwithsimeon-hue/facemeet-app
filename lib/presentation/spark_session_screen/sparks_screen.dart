@@ -10,6 +10,7 @@ import '../../routes/app_routes.dart';
 import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_avatar.dart';
+import 'widgets/spark_schedule_sheet.dart';
 
 class SparksScreen extends StatefulWidget {
   final VoidCallback? onNavigateToDiscover;
@@ -24,9 +25,11 @@ class SparksScreenState extends State<SparksScreen>
     with WidgetsBindingObserver {
   bool _isLoading = true;
   List<Map<String, dynamic>> _pendingMatches = [];
+  List<Map<String, dynamic>> _scheduledIntros = [];
   List<Map<String, dynamic>> _chatUnlockedMatches = [];
 
   RealtimeChannel? _matchesChannel;
+  RealtimeChannel? _schedulesChannel;
   RealtimeChannel? _presenceChannel;
   // Map of userId -> {is_online, last_seen_at}
   final Map<String, Map<String, dynamic>> _presenceMap = {};
@@ -45,19 +48,25 @@ class SparksScreenState extends State<SparksScreen>
     await _loadMatches();
 
     // Retry once if both lists are still empty (cold-start race condition)
-    if (_pendingMatches.isEmpty && _chatUnlockedMatches.isEmpty) {
+    if (_pendingMatches.isEmpty &&
+        _scheduledIntros.isEmpty &&
+        _chatUnlockedMatches.isEmpty) {
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) await _loadMatches();
     }
 
     // Attach realtime listener only after the initial fetch is done
-    if (mounted) _subscribeToMatchChanges();
+    if (mounted) {
+      _subscribeToMatchChanges();
+      _subscribeToScheduleChanges();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _matchesChannel?.unsubscribe();
+    _schedulesChannel?.unsubscribe();
     _presenceChannel?.unsubscribe();
     super.dispose();
   }
@@ -92,12 +101,29 @@ class SparksScreenState extends State<SparksScreen>
         .subscribe();
   }
 
+  void _subscribeToScheduleChanges() {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null) return;
+
+    _schedulesChannel = SupabaseService.instance.client
+        .channel('spark_session_schedules:$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'spark_session_schedules',
+          callback: (_) => _loadMatches(),
+        )
+        .subscribe();
+  }
+
   Future<void> _loadMatches() async {
     setState(() => _isLoading = true);
     try {
       final pending = await SupabaseService.instance.getPendingMatches();
       final chatUnlocked = await SupabaseService.instance
           .getChatUnlockedMatches();
+      final schedules = await SupabaseService.instance
+          .getMyScheduledSparkSessions();
 
       // Enrich each match with the other user's profile
       final uid = SupabaseService.instance.currentUserId;
@@ -108,12 +134,25 @@ class SparksScreenState extends State<SparksScreen>
           .where((m) => m['status'] != 'chat_unlocked')
           .toList();
 
-      final enrichedPending = await _enrichMatches(filteredPending, uid);
+      final enrichedSchedules = await _enrichSchedules(schedules, uid);
+      final scheduledMatchIds = enrichedSchedules
+          .map((schedule) => schedule['match_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      final enrichedPending = await _enrichMatches(
+        filteredPending
+            .where(
+              (match) => !scheduledMatchIds.contains(match['id'] as String?),
+            )
+            .toList(),
+        uid,
+      );
       final enrichedChat = await _enrichMatches(chatUnlocked, uid);
 
       if (mounted) {
         setState(() {
           _pendingMatches = enrichedPending;
+          _scheduledIntros = enrichedSchedules;
           _chatUnlockedMatches = enrichedChat;
           _isLoading = false;
         });
@@ -177,6 +216,30 @@ class SparksScreenState extends State<SparksScreen>
     return enriched;
   }
 
+  Future<List<Map<String, dynamic>>> _enrichSchedules(
+    List<Map<String, dynamic>> schedules,
+    String? uid,
+  ) async {
+    final enriched = <Map<String, dynamic>>[];
+    for (final schedule in schedules) {
+      final proposerId = schedule['proposer_user_id'] as String?;
+      final recipientId = schedule['recipient_user_id'] as String?;
+      final otherId = proposerId == uid ? recipientId : proposerId;
+      final matchId = schedule['match_id'] as String?;
+      if (otherId == null || matchId == null) continue;
+      final blocked = await SupabaseService.instance.hasBlockBetween(otherId);
+      if (blocked) continue;
+      final profile = await SupabaseService.instance.getUserProfile(otherId);
+      if (!SupabaseService.instance.isUserFacingProfileAvailable(profile)) {
+        continue;
+      }
+      final match = await SupabaseService.instance.getMatch(matchId);
+      if (match == null) continue;
+      enriched.add({...schedule, 'other_user': profile ?? {}, 'match': match});
+    }
+    return enriched;
+  }
+
   void _startSparkSession(Map<String, dynamic> match) {
     final matchId = match['id'] as String;
     final uid = SupabaseService.instance.currentUserId;
@@ -192,6 +255,24 @@ class SparksScreenState extends State<SparksScreen>
     );
   }
 
+  void _startScheduledSparkSession(Map<String, dynamic> schedule) {
+    final match = schedule['match'] as Map<String, dynamic>? ?? {};
+    final other = schedule['other_user'] as Map<String, dynamic>? ?? {};
+    final matchId =
+        (schedule['match_id'] as String?) ?? (match['id'] as String?);
+    final otherId = other['id'] as String? ?? '';
+    if (matchId == null || matchId.isEmpty || otherId.isEmpty) return;
+
+    debugPrint(
+      'SPARK SESSION: join tapped from scheduled intro — matchId=$matchId',
+    );
+    Navigator.pushNamed(
+      context,
+      AppRoutes.sparkSessionScreen,
+      arguments: {'matchId': matchId, 'matchedUserId': otherId},
+    );
+  }
+
   /// Subscribe to realtime presence updates for all matched users
   void _subscribeToPresence() {
     _presenceChannel?.unsubscribe();
@@ -199,7 +280,11 @@ class SparksScreenState extends State<SparksScreen>
 
     // Collect all matched user IDs
     final matchedIds = <String>{};
-    for (final m in [..._pendingMatches, ..._chatUnlockedMatches]) {
+    for (final m in [
+      ..._pendingMatches,
+      ..._scheduledIntros,
+      ..._chatUnlockedMatches,
+    ]) {
       final other = m['other_user'] as Map<String, dynamic>? ?? {};
       final otherId = other['id'] as String? ?? '';
       if (otherId.isNotEmpty && otherId != uid) {
@@ -299,6 +384,33 @@ class SparksScreenState extends State<SparksScreen>
                           child: ListView(
                             padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
                             children: [
+                              if (_scheduledIntros.isNotEmpty) ...[
+                                _SectionHeader(
+                                  title: 'Scheduled Intros',
+                                  subtitle:
+                                      '${_scheduledIntros.length} intro${_scheduledIntros.length > 1 ? 's' : ''} planned',
+                                ),
+                                const SizedBox(height: 12),
+                                ..._scheduledIntros.map((schedule) {
+                                  final other =
+                                      schedule['other_user']
+                                          as Map<String, dynamic>? ??
+                                      {};
+                                  final otherId = other['id'] as String? ?? '';
+                                  final presence = _presenceMap[otherId];
+                                  final isOnline =
+                                      presence?['is_online'] as bool? ??
+                                      (other['is_online'] as bool? ?? false);
+                                  return _ScheduledIntroCard(
+                                    schedule: schedule,
+                                    isOnline: isOnline,
+                                    onRefresh: _loadMatches,
+                                    onStartSession: () =>
+                                        _startScheduledSparkSession(schedule),
+                                  );
+                                }),
+                                const SizedBox(height: 24),
+                              ],
                               // ── Ready to Spark section ──
                               if (_pendingMatches.isNotEmpty) ...[
                                 _SectionHeader(
@@ -322,6 +434,19 @@ class SparksScreenState extends State<SparksScreen>
                                     isOnline: isOnline,
                                     onStartSession: () =>
                                         _startSparkSession(match),
+                                    onScheduleSession: () async {
+                                      final scheduled =
+                                          await showSparkScheduleSheet(
+                                            context,
+                                            matchId: match['id'] as String,
+                                            recipientUserId: otherId,
+                                            recipientName:
+                                                other['first_name']
+                                                    as String? ??
+                                                'your match',
+                                          );
+                                      if (scheduled) _loadMatches();
+                                    },
                                   );
                                 }),
                                 const SizedBox(height: 24),
@@ -352,6 +477,7 @@ class SparksScreenState extends State<SparksScreen>
                               ],
                               // ── Empty state ──
                               if (_pendingMatches.isEmpty &&
+                                  _scheduledIntros.isEmpty &&
                                   _chatUnlockedMatches.isEmpty)
                                 _EmptyState(
                                   onStartDiscovering:
@@ -409,11 +535,13 @@ class _SectionHeader extends StatelessWidget {
 class _PendingMatchCard extends StatefulWidget {
   final Map<String, dynamic> match;
   final VoidCallback onStartSession;
+  final VoidCallback onScheduleSession;
   final bool isOnline;
 
   const _PendingMatchCard({
     required this.match,
     required this.onStartSession,
+    required this.onScheduleSession,
     this.isOnline = false,
   });
 
@@ -585,59 +713,400 @@ class _PendingMatchCardState extends State<_PendingMatchCard>
                             ],
                           ),
                           const SizedBox(height: 3),
-                          // "Waiting for you" label
-                          GestureDetector(
-                            onTap: widget.onStartSession,
-                            child: Text(
-                              'Waiting for you — tap to join',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 11,
-                                fontStyle: FontStyle.italic,
-                                color: const Color(0xFFFF4458),
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                          Text(
+                            'Start now or schedule for later',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                              color: const Color(0xFFFF4458),
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 10),
-                    // Start button
-                    GestureDetector(
-                      onTap: widget.onStartSession,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFFFF4458), Color(0xFFFF6B7A)],
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFFFF4458).withAlpha(77),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
+                    Column(
+                      children: [
+                        GestureDetector(
+                          onTap: widget.onStartSession,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
                             ),
-                          ],
-                        ),
-                        child: Text(
-                          'Start Spark\nSession',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            height: 1.3,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFFF4458), Color(0xFFFF6B7A)],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFFF4458).withAlpha(77),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              'Start now',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                height: 1.3,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: widget.onScheduleSession,
+                          child: Text(
+                            'Schedule',
+                            style: GoogleFonts.dmSans(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScheduledIntroCard extends StatelessWidget {
+  final Map<String, dynamic> schedule;
+  final VoidCallback onStartSession;
+  final VoidCallback onRefresh;
+  final bool isOnline;
+
+  const _ScheduledIntroCard({
+    required this.schedule,
+    required this.onStartSession,
+    required this.onRefresh,
+    this.isOnline = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final other = schedule['other_user'] as Map<String, dynamic>? ?? {};
+    final name = other['first_name'] as String? ?? 'Someone';
+    final age = other['age'] as int? ?? 0;
+    final city = other['city'] as String? ?? '';
+    final thumbnailUrl = other['thumbnail_url'] as String?;
+    final status = schedule['status'] as String? ?? 'proposed';
+    final sparkType = SupabaseService.sparkTypeLabel(
+      schedule['spark_type'] as String?,
+    );
+    final currentUserId = SupabaseService.instance.currentUserId;
+    final proposerId = schedule['proposer_user_id'] as String?;
+    final recipientId = schedule['recipient_user_id'] as String?;
+    final isRecipient = recipientId == currentUserId;
+    final proposedTimes = _proposedTimes(schedule);
+    final acceptedTime = _acceptedTime(schedule);
+    final canJoin = acceptedTime != null && _canJoin(acceptedTime);
+    final primaryTime =
+        acceptedTime ?? (proposedTimes.isNotEmpty ? proposedTimes.first : null);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0x1AFFFFFF),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0x333AD29F), width: 1.5),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Stack(
+                        children: [
+                          ProfileAvatar(
+                            thumbnailUrl: thumbnailUrl,
+                            firstName: name,
+                            radius: 32,
+                            borderColor: AppTheme.sparkGreen,
+                          ),
+                          if (isOnline)
+                            Positioned(
+                              right: 2,
+                              bottom: 2,
+                              child: Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF4CAF50),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFF0D0D0F),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              age > 0 ? '$name, $age' : name,
+                              style: GoogleFonts.dmSans(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (city.isNotEmpty)
+                              Text(
+                                city,
+                                style: GoogleFonts.dmSans(
+                                  color: AppTheme.textMuted,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                      _StatusPill(status: status),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.bolt_rounded,
+                        color: AppTheme.primary,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          sparkType,
+                          style: GoogleFonts.dmSans(
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    acceptedTime != null
+                        ? 'Scheduled for ${formatSparkScheduleTime(acceptedTime)}'
+                        : primaryTime != null
+                        ? 'Proposed: ${formatSparkScheduleTime(primaryTime)}'
+                        : 'Time not selected yet',
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (status != 'accepted' && proposedTimes.length > 1) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${proposedTimes.length} suggested times available',
+                      style: GoogleFonts.dmSans(
+                        color: AppTheme.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  if (status == 'accepted') ...[
+                    _ActionButton(
+                      label: canJoin
+                          ? 'Join 3-minute intro'
+                          : 'Join opens near scheduled time',
+                      filled: canJoin,
+                      onTap: canJoin ? onStartSession : null,
+                    ),
+                  ] else if (isRecipient && proposedTimes.isNotEmpty) ...[
+                    _ActionButton(
+                      label: 'Accept time',
+                      filled: true,
+                      onTap: () async {
+                        await SupabaseService.instance
+                            .acceptSparkSessionSchedule(
+                              scheduleId: schedule['id'] as String,
+                              notifyUserId: proposerId ?? '',
+                              acceptedTime: proposedTimes.first,
+                            );
+                        onRefresh();
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ActionButton(
+                            label: 'Suggest another',
+                            onTap: () async {
+                              final changed = await showSparkScheduleSheet(
+                                context,
+                                matchId: schedule['match_id'] as String,
+                                recipientUserId: proposerId ?? '',
+                                recipientName: name,
+                                schedule: schedule,
+                              );
+                              if (changed) onRefresh();
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _ActionButton(
+                            label: 'Start now',
+                            onTap: onStartSession,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ActionButton(
+                            label: 'Start now',
+                            filled: true,
+                            onTap: onStartSession,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _ActionButton(
+                            label: 'Cancel',
+                            onTap: () async {
+                              await SupabaseService.instance
+                                  .cancelSparkSessionSchedule(
+                                    scheduleId: schedule['id'] as String,
+                                  );
+                              onRefresh();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static List<DateTime> _proposedTimes(Map<String, dynamic> schedule) {
+    final raw = schedule['proposed_times'];
+    if (raw is! List) return [];
+    return raw
+        .map((value) => DateTime.tryParse(value.toString())?.toLocal())
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+  }
+
+  static DateTime? _acceptedTime(Map<String, dynamic> schedule) {
+    final raw = schedule['accepted_time']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toLocal();
+  }
+
+  static bool _canJoin(DateTime acceptedTime) {
+    final now = DateTime.now();
+    return now.isAfter(acceptedTime.subtract(const Duration(minutes: 15))) &&
+        now.isBefore(acceptedTime.add(const Duration(minutes: 45)));
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String status;
+
+  const _StatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (status) {
+      'accepted' => 'Accepted',
+      'countered' => 'New times',
+      _ => 'Proposed',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.sparkGreen.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.dmSans(
+          color: AppTheme.sparkGreen,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final bool filled;
+
+  const _ActionButton({required this.label, this.onTap, this.filled = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: onTap == null ? 0.5 : 1,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: filled
+                ? AppTheme.primary
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: filled
+                ? null
+                : Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
@@ -657,10 +1126,8 @@ class _ChatUnlockedMatchCard extends StatelessWidget {
     final other = match['other_user'] as Map<String, dynamic>? ?? {};
     final name = other['first_name'] as String? ?? 'Someone';
     final age = other['age'] as int? ?? 0;
-    final city = other['city'] as String? ?? '';
     final thumbnailUrl = other['thumbnail_url'] as String?;
     final matchId = match['id'] as String? ?? '';
-    final otherId = other['id'] as String? ?? '';
     final lastMessage =
         match['last_message'] as String? ?? 'Chat is unlocked — say hello!';
     final lastMessageTime = match['last_message_time'] as String? ?? '';

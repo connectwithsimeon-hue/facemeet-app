@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1123,6 +1124,152 @@ class SupabaseService {
         .eq('id', matchId)
         .maybeSingle();
     return response;
+  }
+
+  // ============================================================
+  // SCHEDULED SPARK SESSIONS
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> getMyScheduledSparkSessions() async {
+    final response = await client.rpc('get_my_scheduled_spark_sessions');
+    return List<Map<String, dynamic>>.from(response as List? ?? const []);
+  }
+
+  Future<Map<String, dynamic>> createSparkSessionSchedule({
+    required String matchId,
+    required String recipientUserId,
+    required List<DateTime> proposedTimes,
+  }) async {
+    final response = await client.rpc(
+      'create_spark_session_schedule',
+      params: {
+        'p_match_id': matchId,
+        'p_proposed_times': _scheduleTimesPayload(proposedTimes),
+      },
+    );
+    final schedule = Map<String, dynamic>.from(response as Map);
+    unawaited(
+      _sendSparkSchedulePush(
+        userId: recipientUserId,
+        type: 'spark_schedule_proposed',
+        schedule: schedule,
+      ),
+    );
+    return schedule;
+  }
+
+  Future<Map<String, dynamic>> acceptSparkSessionSchedule({
+    required String scheduleId,
+    required String notifyUserId,
+    required DateTime acceptedTime,
+  }) async {
+    final response = await client.rpc(
+      'accept_spark_session_schedule',
+      params: {
+        'p_schedule_id': scheduleId,
+        'p_accepted_time': acceptedTime.toUtc().toIso8601String(),
+      },
+    );
+    final schedule = Map<String, dynamic>.from(response as Map);
+    unawaited(
+      _sendSparkSchedulePush(
+        userId: notifyUserId,
+        type: 'spark_schedule_accepted',
+        schedule: schedule,
+      ),
+    );
+    return schedule;
+  }
+
+  Future<Map<String, dynamic>> counterSparkSessionSchedule({
+    required String scheduleId,
+    required String notifyUserId,
+    required List<DateTime> proposedTimes,
+  }) async {
+    final response = await client.rpc(
+      'counter_spark_session_schedule',
+      params: {
+        'p_schedule_id': scheduleId,
+        'p_proposed_times': _scheduleTimesPayload(proposedTimes),
+      },
+    );
+    final schedule = Map<String, dynamic>.from(response as Map);
+    unawaited(
+      _sendSparkSchedulePush(
+        userId: notifyUserId,
+        type: 'spark_schedule_proposed',
+        schedule: schedule,
+      ),
+    );
+    return schedule;
+  }
+
+  Future<Map<String, dynamic>> cancelSparkSessionSchedule({
+    required String scheduleId,
+  }) async {
+    final response = await client.rpc(
+      'cancel_spark_session_schedule',
+      params: {'p_schedule_id': scheduleId},
+    );
+    return Map<String, dynamic>.from(response as Map);
+  }
+
+  List<String> _scheduleTimesPayload(List<DateTime> proposedTimes) {
+    final sorted = proposedTimes.map((time) => time.toUtc()).toSet().toList()
+      ..sort();
+    return sorted.take(3).map((time) => time.toIso8601String()).toList();
+  }
+
+  Future<void> _sendSparkSchedulePush({
+    required String userId,
+    required String type,
+    required Map<String, dynamic> schedule,
+  }) async {
+    final sparkType = normalizeSparkType(schedule['spark_type'] as String?);
+    final professional = sparkType == 'professional';
+    final title = switch (type) {
+      'spark_schedule_accepted' =>
+        professional
+            ? 'Professional Connection intro scheduled'
+            : 'Your Spark intro is scheduled',
+      _ =>
+        professional
+            ? 'Schedule your Professional Connection intro'
+            : 'Schedule your Spark intro',
+    };
+    final body = switch (type) {
+      'spark_schedule_accepted' =>
+        professional
+            ? 'Your Professional Connection intro time is confirmed.'
+            : 'Your 3-minute intro time is confirmed.',
+      _ =>
+        professional
+            ? 'Choose a time for your Professional Connection intro.'
+            : 'Choose a time for your 3-minute intro.',
+    };
+
+    try {
+      await client.functions.invoke(
+        'send_push_notification',
+        body: {
+          'user_id': userId,
+          'target_user_id': userId,
+          if (currentUserId != null) 'sender_user_id': currentUserId,
+          'type': type,
+          'title': title,
+          'body': body,
+          'data': {
+            'type': type,
+            'match_id': schedule['match_id'],
+            'schedule_id': schedule['id'],
+            'spark_type': sparkType,
+            'url': '/',
+          },
+        },
+      );
+    } catch (e) {
+      debugPrint('SCHEDULED SPARK PUSH: failed type=$type — $e');
+    }
   }
 
   // ============================================================

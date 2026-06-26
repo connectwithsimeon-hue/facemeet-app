@@ -12,6 +12,7 @@ import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_navigation.dart';
 import '../../widgets/loading_skeleton_widget.dart';
+import '../spark_session_screen/widgets/spark_schedule_sheet.dart';
 import './widgets/discovery_card_widget.dart';
 import './widgets/match_celebration_widget.dart';
 import '../main_shell_screen/main_shell_screen.dart';
@@ -500,6 +501,17 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
               context,
               AppRoutes.sparkSessionScreen,
               arguments: {'matchId': matchId, 'matchedUserId': matchedUserId},
+            );
+          },
+          onScheduleLater: () {
+            Navigator.of(dialogContext).pop();
+            unawaited(
+              showSparkScheduleSheet(
+                context,
+                matchId: matchId,
+                recipientUserId: matchedUserId,
+                recipientName: matchedName,
+              ).then((_) => _advanceCard()),
             );
           },
         );

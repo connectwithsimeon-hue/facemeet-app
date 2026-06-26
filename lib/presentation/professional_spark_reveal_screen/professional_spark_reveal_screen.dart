@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -6,6 +8,7 @@ import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_avatar.dart';
 import '../../widgets/user_safety_actions.dart';
+import '../spark_session_screen/widgets/spark_schedule_sheet.dart';
 
 class ProfessionalSparkRevealScreen extends StatefulWidget {
   final String? senderUserId;
@@ -123,11 +126,10 @@ class _ProfessionalSparkRevealScreenState
       final matchId = matchRow?['id'] as String?;
       final status = matchRow?['status'] as String? ?? '';
       if (matchId != null && matchId.isNotEmpty && status != 'chat_unlocked') {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          AppRoutes.sparkSessionScreen,
-          (route) => false,
-          arguments: {'matchId': matchId, 'matchedUserId': senderUserId},
+        await _showMutualSparkChoice(
+          matchId: matchId,
+          senderUserId: senderUserId,
+          senderName: _profile?['first_name'] as String? ?? 'your match',
         );
         return;
       }
@@ -159,6 +161,98 @@ class _ProfessionalSparkRevealScreenState
         ),
       );
     }
+  }
+
+  Future<void> _showMutualSparkChoice({
+    required String matchId,
+    required String senderUserId,
+    required String senderName,
+  }) async {
+    if (!mounted) return;
+    setState(() => _isSparkingBack = false);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A1E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'You both Sparked',
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Start your 3-minute intro now, or schedule it for later.',
+                style: GoogleFonts.dmSans(
+                  color: AppTheme.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    AppRoutes.sparkSessionScreen,
+                    (route) => false,
+                    arguments: {
+                      'matchId': matchId,
+                      'matchedUserId': senderUserId,
+                    },
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                ),
+                child: Text(
+                  'Start 3-minute intro now',
+                  style: GoogleFonts.dmSans(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  unawaited(
+                    showSparkScheduleSheet(
+                      context,
+                      matchId: matchId,
+                      recipientUserId: senderUserId,
+                      recipientName: senderName,
+                    ),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0x33FFFFFF)),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                ),
+                child: Text(
+                  'Schedule for later',
+                  style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _goToDiscover() {

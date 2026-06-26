@@ -354,6 +354,13 @@ class PushNotificationService {
         return 'It’s a match';
       case 'chat_unlocked':
         return 'Chat unlocked';
+      case 'spark_schedule_proposed':
+        return 'Schedule your Spark intro';
+      case 'spark_schedule_accepted':
+        return 'Your Spark intro is scheduled';
+      case 'spark_schedule_reminder':
+      case 'spark_schedule_ready':
+        return 'Your Spark intro is starting soon';
       case 'new_message':
         return 'New message';
       case 'event_reminder':
@@ -381,6 +388,13 @@ class PushNotificationService {
         return 'Open FaceMeet to start your Spark Session.';
       case 'chat_unlocked':
         return 'You both felt the spark. Say hello.';
+      case 'spark_schedule_proposed':
+        return 'Open FaceMeet to choose a time.';
+      case 'spark_schedule_accepted':
+        return 'Open FaceMeet to view your scheduled intro.';
+      case 'spark_schedule_reminder':
+      case 'spark_schedule_ready':
+        return 'Open FaceMeet to join when you are ready.';
       case 'new_message':
         return 'Open FaceMeet to reply.';
       case 'pairing_preferences_open':
@@ -672,7 +686,20 @@ class PushNotificationService {
         }
         break;
       default:
-        if (_isEventNotificationType(type)) {
+        if (_isSparkScheduleNotificationType(type)) {
+          final shell = mainShellKey.currentState;
+          _log(
+            'SPARK SCHEDULE: route target after notification tap — sparksScreen',
+          );
+          if (shell != null) {
+            shell.refreshSparks();
+          } else {
+            navigator.pushNamedAndRemoveUntil(
+              AppRoutes.sparksScreen,
+              (route) => false,
+            );
+          }
+        } else if (_isEventNotificationType(type)) {
           final shell = mainShellKey.currentState;
           _log('EVENTS: route target after notification tap — eventsScreen');
           if (shell != null) {
@@ -700,6 +727,14 @@ class PushNotificationService {
         normalized == 'event_approved' ||
         normalized == 'event_waitlisted' ||
         normalized == 'event_rejected';
+  }
+
+  bool _isSparkScheduleNotificationType(String? type) {
+    final normalized = type?.trim().toLowerCase().replaceAll('-', '_');
+    return normalized == 'spark_schedule_proposed' ||
+        normalized == 'spark_schedule_accepted' ||
+        normalized == 'spark_schedule_reminder' ||
+        normalized == 'spark_schedule_ready';
   }
 
   bool _isProfessionalSparkPayload(Map<String, dynamic> data) {

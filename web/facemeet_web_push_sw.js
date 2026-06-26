@@ -35,11 +35,20 @@ self.addEventListener("notificationclick", (event) => {
     data.type === "new_spark" && data.spark_type === "professional"
       ? data.sender_user_id || data.professional_spark_sender_id || data.from_user_id
       : null;
+  const sparkScheduleType =
+    data.type === "spark_schedule_proposed" ||
+    data.type === "spark_schedule_accepted" ||
+    data.type === "spark_schedule_reminder" ||
+    data.type === "spark_schedule_ready"
+      ? data.type
+      : null;
   const targetUrl =
     data.match_id && (data.type === "spark_session" || data.type === "new_match")
       ? `/?push_type=${encodeURIComponent(data.type)}&spark_match_id=${encodeURIComponent(data.match_id)}`
       : professionalSparkSender
       ? `/?push_type=new_spark&spark_type=professional&sender_user_id=${encodeURIComponent(professionalSparkSender)}`
+      : sparkScheduleType
+      ? `/?push_type=${encodeURIComponent(sparkScheduleType)}`
       : data.url || "/";
   const url = new URL(targetUrl, self.location.origin).href;
 

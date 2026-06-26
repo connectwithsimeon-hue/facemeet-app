@@ -19,6 +19,7 @@ import '../discovery_feed_screen/discovery_feed_screen.dart';
 import '../events_screen/events_screen.dart';
 import '../profile_screen/profile_screen.dart';
 import '../spark_session_screen/sparks_screen.dart';
+import '../spark_session_screen/widgets/spark_schedule_sheet.dart';
 
 class MainShellScreen extends StatefulWidget {
   final int initialIndex;
@@ -539,9 +540,11 @@ class MainShellScreenState extends State<MainShellScreen> {
       body:
           '${profile?['first_name'] as String? ?? 'Your match'} wants to start another Spark Session right now.',
       ctaLabel: 'Join Spark Session now',
+      secondaryLabel: 'Not now',
       onJoinOverride: () {
         unawaited(_acceptRepeatSparkInvite(matchId, matchedUserId));
       },
+      onJoinLaterOverride: () {},
     );
   }
 
@@ -601,7 +604,9 @@ class MainShellScreenState extends State<MainShellScreen> {
     required String? thumbnailUrl,
     String? body,
     String ctaLabel = 'Join Spark Session now',
+    String secondaryLabel = 'Schedule for later',
     VoidCallback? onJoinOverride,
+    VoidCallback? onJoinLaterOverride,
   }) {
     // Remove any existing overlay first
     _removeMatchOverlay();
@@ -633,9 +638,22 @@ class MainShellScreenState extends State<MainShellScreen> {
         },
         onJoinLater: () {
           _removeMatchOverlay();
+          if (onJoinLaterOverride != null) {
+            onJoinLaterOverride();
+          } else {
+            unawaited(
+              showSparkScheduleSheet(
+                context,
+                matchId: matchId,
+                recipientUserId: matchedUserId,
+                recipientName: name,
+              ),
+            );
+          }
         },
         body: body,
         ctaLabel: ctaLabel,
+        secondaryLabel: secondaryLabel,
       ),
     );
 
@@ -854,6 +872,7 @@ class _SparkMatchModal extends StatefulWidget {
   final VoidCallback onJoinLater;
   final String? body;
   final String ctaLabel;
+  final String secondaryLabel;
 
   const _SparkMatchModal({
     required this.matchId,
@@ -865,6 +884,7 @@ class _SparkMatchModal extends StatefulWidget {
     required this.onJoinLater,
     this.body,
     required this.ctaLabel,
+    required this.secondaryLabel,
   });
 
   @override
@@ -1092,7 +1112,7 @@ class _SparkMatchModalState extends State<_SparkMatchModal>
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               child: Text(
-                                'Join later',
+                                widget.secondaryLabel,
                                 style: GoogleFonts.dmSans(
                                   fontSize: 14,
                                   color: const Color(0xFF8A8A9A),
