@@ -623,15 +623,32 @@ class _PosterCropOverlay extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        child: Image.asset(
-          imageAsset,
-          fit: BoxFit.cover,
-          alignment: Alignment.bottomCenter,
-          semanticLabel: imageLabel,
-          errorBuilder: (_, __, ___) => Container(
-            color: const Color(0xFF1A1A2E),
-            child: const Icon(Icons.videocam, color: Colors.white24, size: 60),
-          ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return ClipRect(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: 0.52,
+                child: Image.asset(
+                  imageAsset,
+                  width: constraints.maxWidth,
+                  fit: BoxFit.fitWidth,
+                  alignment: Alignment.bottomCenter,
+                  semanticLabel: imageLabel,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    color: const Color(0xFF1A1A2E),
+                    child: const Icon(
+                      Icons.videocam,
+                      color: Colors.white24,
+                      size: 60,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
