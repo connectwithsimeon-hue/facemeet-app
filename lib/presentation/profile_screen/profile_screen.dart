@@ -590,7 +590,7 @@ class ProfileScreenState extends State<ProfileScreen> {
   // ─── Share helpers ────────────────────────────────────────────────────────
 
   String get _shareMessage =>
-      'I\'m using FaceMeet — a video-first connection app for friendship, professional networking, dating, and events.\n\n'
+      'I\'m using FaceMeet — a video-first social connection app for professional connections, friendship, social connections, and live topics.\n\n'
       'Join me on Android:\n$_playStoreShareUrl';
 
   String get _playStoreShareUrl {
@@ -641,7 +641,7 @@ class ProfileScreenState extends State<ProfileScreen> {
       case 'friendship':
         return 'I\'m on FaceMeet for Friendship. Download the Android app and Spark me there:\n$url';
       case 'dating':
-        return 'I\'m on FaceMeet for Dating. Download the Android app and Spark me there:\n$url';
+        return 'I\'m on FaceMeet for Social Connections. Download the Android app and Spark me there:\n$url';
       case 'open_to_all':
         return 'I\'m on FaceMeet for real connections. Download the Android app and Spark me there:\n$url';
       default:
@@ -2699,7 +2699,7 @@ class _ConnectionIntentEditor extends StatelessWidget {
   });
 
   static const _options = [
-    _ConnectionIntentOption(value: 'dating', label: 'Dating'),
+    _ConnectionIntentOption(value: 'dating', label: 'Social Connections'),
     _ConnectionIntentOption(value: 'friendship', label: 'Friendship'),
     _ConnectionIntentOption(
       value: 'professional',

@@ -307,7 +307,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
     // Step 1b — Send spark notification to the sparked user.
     // Professional Connection Sparks intentionally reveal the sender profile;
-    // Dating/Friendship Sparks keep the private mystery flow.
+    // Social/Friendship Sparks keep the private mystery flow.
     debugPrint('SPARK PUSH: spark created');
     debugPrint(
       'SPARK PUSH: recipient user id present yes/no=${uid.isNotEmpty}',
@@ -911,7 +911,7 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     final normalized = SupabaseService.normalizeConnectionIntent(viewerIntent);
     const allFilters = [
       _IntentFilterOption(value: 'all', label: 'All'),
-      _IntentFilterOption(value: 'dating', label: 'Dating'),
+      _IntentFilterOption(value: 'dating', label: 'Social Connections'),
       _IntentFilterOption(value: 'friendship', label: 'Friendship'),
       _IntentFilterOption(
         value: 'professional',
@@ -948,7 +948,7 @@ class _SparkTypeSelectorSheet extends StatelessWidget {
   const _SparkTypeSelectorSheet();
 
   static const _options = [
-    _SparkTypeOption(value: 'dating', label: 'Dating Spark'),
+    _SparkTypeOption(value: 'dating', label: 'Social Connection Spark'),
     _SparkTypeOption(value: 'friendship', label: 'Friendship Spark'),
     _SparkTypeOption(
       value: 'professional',

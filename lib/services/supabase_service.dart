@@ -213,7 +213,7 @@ class SupabaseService {
         return 'Open to All';
       case 'dating':
       default:
-        return 'Dating';
+        return 'Social Connections';
     }
   }
 
@@ -262,7 +262,7 @@ class SupabaseService {
         return 'Professional Connection Spark';
       case 'dating':
       default:
-        return 'Dating Spark';
+        return 'Social Connection Spark';
     }
   }
 

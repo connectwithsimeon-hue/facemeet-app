@@ -319,7 +319,7 @@ class _EventsScreenState extends State<EventsScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Curated in-person experiences for members ready to turn real chemistry into real moments.',
+            'Curated in-person experiences for members ready to turn shared intent into real moments.',
             style: GoogleFonts.cormorantGaramond(
               fontSize: 30,
               height: 1.08,

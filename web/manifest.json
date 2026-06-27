@@ -8,9 +8,9 @@
     "display_override": ["standalone", "fullscreen", "minimal-ui"],
     "background_color": "#070302",
     "theme_color": "#F4513E",
-    "description": "FaceMeet is the video-first dating app with real video profiles, Mutual Sparks, and 3-minute Spark Dates.",
+    "description": "FaceMeet is the video-first social connection app with real video profiles, Mutual Sparks, and 3-minute Spark Sessions.",
     "orientation": "any",
-    "categories": ["dating", "social", "lifestyle"],
+    "categories": ["social", "lifestyle"],
     "prefer_related_applications": false,
     "icons": [
         {

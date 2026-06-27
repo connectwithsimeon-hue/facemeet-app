@@ -24,48 +24,43 @@ class _IntroCarouselScreenState extends State<IntroCarouselScreen> {
 
   final List<_SlideData> _slides = const [
     _SlideData(
-      headline1: 'Meet ',
-      headline1Coral: 'Real People,',
-      headline2: 'Not Photos',
-      subtitle:
-          'Every match starts with a live\nvideo date — no hiding behind filters.',
-      imageUrl:
-          'https://images.pexels.com/photos/4226140/pexels-photo-4226140.jpeg?auto=compress&cs=tinysrgb&w=800',
-      imageLabel: 'Woman smiling on a video call with a man in a warm-lit room',
-      overlayWidget: _Slide1Overlay(),
-    ),
-    _SlideData(
-      headline1: '100%\n',
-      headline1Coral: 'Catfish-Free',
-      headline2: '',
-      subtitle:
-          'You see them live before you ever swipe.\nWhat you see is what you get.',
-      imageUrl:
-          'https://images.pexels.com/photos/4226140/pexels-photo-4226140.jpeg?auto=compress&cs=tinysrgb&w=800',
-      imageLabel:
-          'Woman smiling on a video call showing verified live badge overlay',
-      overlayWidget: _Slide2Overlay(),
-    ),
-    _SlideData(
-      headline1Coral: '3 Minutes to\n',
       headline1: '',
-      headline2: 'Feel the Chemistry',
+      headline1Coral: 'Professional Connections',
+      headline2: '',
       subtitle:
-          'Quick video sparks mean\nno wasted time — you\'ll know instantly.',
-      imageUrl:
-          'https://images.pexels.com/photos/3807571/pexels-photo-3807571.jpeg?auto=compress&cs=tinysrgb&w=800',
+          'Meet founders, creators, and professionals through real video-first introductions.',
       imageLabel:
-          'Black woman smiling on a live video call with a timer showing 3 minutes',
-      overlayWidget: _Slide3Overlay(),
+          'FaceMeet Professional Connections onboarding slide with a video-first introduction scene',
+      overlayWidget: _PosterCropOverlay(
+        imageAsset: 'assets/images/professional_connections.png',
+        imageLabel: 'Professional video-first introduction scene',
+      ),
     ),
     _SlideData(
-      headline1: 'Ready to Meet\n',
-      headline1Coral: 'Your Match?',
+      headline1: '',
+      headline1Coral: 'Friendship',
       headline2: '',
-      subtitle: 'Join thousands already\nsparking real connections.',
-      imageUrl: '',
-      imageLabel: '',
-      overlayWidget: _Slide4Overlay(),
+      subtitle:
+          'Find people you genuinely click with through short video-first introductions.',
+      imageLabel:
+          'FaceMeet Friendship onboarding slide with multiple smiling video-first introductions',
+      overlayWidget: _PosterCropOverlay(
+        imageAsset: 'assets/images/friendship.png',
+        imageLabel: 'Friendship video-first introduction scene',
+      ),
+    ),
+    _SlideData(
+      headline1: '',
+      headline1Coral: 'Social Connections',
+      headline2: '',
+      subtitle:
+          'Meet real people through short video-first conversations built around shared intent.',
+      imageLabel:
+          'FaceMeet Social Connections onboarding slide with a video-first conversation scene',
+      overlayWidget: _PosterCropOverlay(
+        imageAsset: 'assets/images/social_connections.png',
+        imageLabel: 'Video-first social connection conversation scene',
+      ),
     ),
   ];
 
@@ -403,7 +398,6 @@ class _SlideData {
   final String headline1Coral;
   final String headline2;
   final String subtitle;
-  final String imageUrl;
   final String imageLabel;
   final Widget overlayWidget;
 
@@ -412,7 +406,6 @@ class _SlideData {
     required this.headline1Coral,
     required this.headline2,
     required this.subtitle,
-    required this.imageUrl,
     required this.imageLabel,
     required this.overlayWidget,
   });
@@ -605,466 +598,41 @@ class _HeadlineText extends StatelessWidget {
 
 // ─── Slide overlays ───────────────────────────────────────────────────────────
 
-/// Slide 1 — video call mockup with timer badge
-class _Slide1Overlay extends StatelessWidget {
-  const _Slide1Overlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return _VideoCallMockup(
-      imageUrl: '',
-      imageAsset: 'assets/images/slide1_image-1778035225680.png',
-      imageLabel: 'Woman smiling on a video call with a man in a warm-lit room',
-      badgeWidget: const SizedBox.shrink(),
-      bottomWidget: const SizedBox.shrink(),
-    );
-  }
-}
-
-/// Slide 2 — video call mockup with verified live badge
-class _Slide2Overlay extends StatelessWidget {
-  const _Slide2Overlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return _VideoCallMockup(
-      imageUrl: '',
-      imageAsset: 'assets/images/slide2_image-1778035226223.png',
-      imageLabel:
-          'Woman smiling on a video call showing verified live badge overlay',
-      badgeWidget: const SizedBox.shrink(),
-      bottomWidget: _VerifiedLiveBadge(),
-    );
-  }
-}
-
-/// Slide 3 — video call mockup with 3-min timer ring
-class _Slide3Overlay extends StatelessWidget {
-  const _Slide3Overlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return _VideoCallMockup(
-      imageUrl: '',
-      imageAsset: 'assets/images/slide3_image-1778035226227.png',
-      imageLabel:
-          'Black woman smiling on a live video call with a timer showing 3 minutes',
-      badgeWidget: _LiveBadge(),
-      bottomWidget: _TimerRingWidget(),
-    );
-  }
-}
-
-/// Slide 4 — centered logo + CTA (no image)
-class _Slide4Overlay extends StatelessWidget {
-  const _Slide4Overlay();
-
-  static const _coral = Color(0xFFE8503A);
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // App icon with glow
-          Container(
-            width: 160,
-            height: 160,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(36),
-              boxShadow: [
-                BoxShadow(
-                  color: _coral.withAlpha(128),
-                  blurRadius: 60,
-                  spreadRadius: 10,
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(36),
-              child: Image.asset(
-                'assets/images/facemeet_splash_logo-1778015584859.png',
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  decoration: BoxDecoration(
-                    gradient: const RadialGradient(
-                      colors: [Color(0xFF3A1010), Color(0xFF1A0808)],
-                    ),
-                    borderRadius: BorderRadius.circular(36),
-                    border: Border.all(color: _coral.withAlpha(102), width: 2),
-                  ),
-                  child: const Icon(Icons.favorite, color: _coral, size: 80),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          // Floating hearts decoration
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _FloatingHeart(size: 28, opacity: 0.25, offset: -30),
-              const SizedBox(width: 80),
-              _FloatingHeart(size: 40, opacity: 0.2, offset: 0),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Reusable video call mockup container ─────────────────────────────────────
-
-class _VideoCallMockup extends StatelessWidget {
-  final String imageUrl;
-  final String? imageAsset;
+class _PosterCropOverlay extends StatelessWidget {
+  final String imageAsset;
   final String imageLabel;
-  final Widget badgeWidget;
-  final Widget bottomWidget;
 
-  const _VideoCallMockup({
-    required this.imageUrl,
-    this.imageAsset,
+  const _PosterCropOverlay({
+    required this.imageAsset,
     required this.imageLabel,
-    required this.badgeWidget,
-    required this.bottomWidget,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(color: Colors.white.withAlpha(31), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFE8503A).withAlpha(64),
+            color: const Color(0xFFE8503A).withAlpha(56),
             blurRadius: 40,
             spreadRadius: 5,
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Main video feed image
-            imageAsset != null && imageAsset!.isNotEmpty
-                ? Image.asset(
-                    imageAsset!,
-                    fit: BoxFit.cover,
-                    semanticLabel: imageLabel,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: const Color(0xFF1A1A2E),
-                      child: const Icon(
-                        Icons.videocam,
-                        color: Colors.white24,
-                        size: 60,
-                      ),
-                    ),
-                  )
-                : Image.network(
-                    imageUrl,
-                    fit: BoxFit.cover,
-                    semanticLabel: imageLabel,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: const Color(0xFF1A1A2E),
-                      child: const Icon(
-                        Icons.videocam,
-                        color: Colors.white24,
-                        size: 60,
-                      ),
-                    ),
-                  ),
-
-            // Warm gradient overlay at bottom
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 200,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withAlpha(179)],
-                  ),
-                ),
-              ),
-            ),
-
-            // Top-left badge (timer or LIVE)
-            Positioned(top: 14, left: 14, child: badgeWidget),
-
-            // Bottom widget (controls or badge)
-            Positioned(bottom: 0, left: 0, right: 0, child: bottomWidget),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Small UI components ──────────────────────────────────────────────────────
-
-class _TimerBadge extends StatelessWidget {
-  final String label;
-
-  const _TimerBadge({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(140),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-              color: Color(0xFFE8503A),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.dmSans(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LiveBadge extends StatelessWidget {
-  const _LiveBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withAlpha(140),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-              color: Color(0xFFE8503A),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'LIVE',
-            style: GoogleFonts.dmSans(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CallControls extends StatelessWidget {
-  const _CallControls();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _ControlButton(icon: Icons.mic, isMain: false),
-          const SizedBox(width: 20),
-          _ControlButton(icon: Icons.call_end, isMain: true),
-          const SizedBox(width: 20),
-          _ControlButton(icon: Icons.videocam, isMain: false),
-        ],
-      ),
-    );
-  }
-}
-
-class _ControlButton extends StatelessWidget {
-  final IconData icon;
-  final bool isMain;
-
-  const _ControlButton({required this.icon, required this.isMain});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: isMain ? 56 : 48,
-      height: isMain ? 56 : 48,
-      decoration: BoxDecoration(
-        color: isMain ? const Color(0xFFE8503A) : Colors.black.withAlpha(140),
-        shape: BoxShape.circle,
-      ),
-      child: Icon(icon, color: Colors.white, size: isMain ? 26 : 22),
-    );
-  }
-}
-
-class _VerifiedLiveBadge extends StatelessWidget {
-  const _VerifiedLiveBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16, right: 16),
-      child: Align(
-        alignment: Alignment.bottomRight,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Coral checkmark badge
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8503A),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFE8503A).withAlpha(128),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.check_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Verified Live label
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withAlpha(179),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Verified Live',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(
-                    'Real. Live. Verified.',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 11,
-                      color: Colors.white60,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TimerRingWidget extends StatelessWidget {
-  const _TimerRingWidget();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Center(
-        child: Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.black.withAlpha(191),
-            border: Border.all(color: const Color(0xFFE8503A), width: 3),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFE8503A).withAlpha(128),
-                blurRadius: 20,
-                spreadRadius: 3,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '03:00',
-                style: GoogleFonts.dmSans(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFFE8503A),
-                ),
-              ),
-              Text(
-                'min left',
-                style: GoogleFonts.dmSans(fontSize: 11, color: Colors.white60),
-              ),
-            ],
+        borderRadius: BorderRadius.circular(28),
+        child: Image.asset(
+          imageAsset,
+          fit: BoxFit.cover,
+          alignment: Alignment.bottomCenter,
+          semanticLabel: imageLabel,
+          errorBuilder: (_, __, ___) => Container(
+            color: const Color(0xFF1A1A2E),
+            child: const Icon(Icons.videocam, color: Colors.white24, size: 60),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _FloatingHeart extends StatelessWidget {
-  final double size;
-  final double opacity;
-  final double offset;
-
-  const _FloatingHeart({
-    required this.size,
-    required this.opacity,
-    required this.offset,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: Offset(offset, 0),
-      child: Icon(
-        Icons.favorite,
-        color: const Color(0xFFE8503A).withOpacity(opacity),
-        size: size,
       ),
     );
   }

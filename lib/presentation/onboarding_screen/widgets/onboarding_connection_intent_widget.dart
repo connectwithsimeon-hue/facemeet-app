@@ -19,8 +19,8 @@ class OnboardingConnectionIntentWidget extends StatelessWidget {
   static const List<_ConnectionIntentOption> _options = [
     _ConnectionIntentOption(
       value: 'dating',
-      label: 'Dating',
-      description: 'Meet people with romantic chemistry.',
+      label: 'Social Connections',
+      description: 'Meet real people through video-first conversations.',
       icon: Icons.favorite_rounded,
     ),
     _ConnectionIntentOption(

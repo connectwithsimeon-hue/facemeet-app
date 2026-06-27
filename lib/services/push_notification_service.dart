@@ -381,7 +381,7 @@ class PushNotificationService {
     final type = data['type']?.toString();
     switch (type) {
       case 'spark_session':
-        return 'Tap to join your 3-minute video date.';
+        return 'Tap to join your 3-minute Spark Session.';
       case 'new_spark':
         return 'Open FaceMeet to respond.';
       case 'new_match':

@@ -44,7 +44,7 @@ class _OnboardingStep4WidgetState extends State<OnboardingStep4Widget>
   // ── Video prompt state ──
   static const List<String> _prompts = [
     'What is one thing that makes you, you?',
-    'What should your first date know about you?',
+    'What should your first intro know about you?',
     'What is a deal breaker for you?',
     'What are you passionate about right now?',
     'Describe your perfect Sunday.',

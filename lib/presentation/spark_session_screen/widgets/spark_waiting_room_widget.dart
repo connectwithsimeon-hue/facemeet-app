@@ -444,7 +444,7 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
               userId: otherUserId,
               type: 'spark_session',
               title: 'Your Spark Session is ready',
-              body: 'Tap to join your 3-minute video date.',
+              body: 'Tap to join your 3-minute Spark Session.',
               data: {'match_id': matchId, 'type': 'spark_session'},
             );
           }

@@ -448,7 +448,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
       }
     }
     // First-time session or status check failed — show decision/rating screen
-    debugPrint('SPARK SESSION: first spark date ended — matchId=$matchId');
+    debugPrint('SPARK SESSION: first Spark Session ended — matchId=$matchId');
     debugPrint('SPARK SESSION: how-did-it-feel screen shown');
     _incrementSparksUsed();
     setState(() => _phase = SparkSessionPhase.decision);
