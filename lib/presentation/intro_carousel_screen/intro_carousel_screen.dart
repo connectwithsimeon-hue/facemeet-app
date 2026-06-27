@@ -24,43 +24,19 @@ class _IntroCarouselScreenState extends State<IntroCarouselScreen> {
 
   final List<_SlideData> _slides = const [
     _SlideData(
-      headline1: '',
-      headline1Coral: 'Professional Connections',
-      headline2: '',
-      subtitle:
-          'Meet founders, creators, and professionals through real video-first introductions.',
+      fullScreenAsset: 'assets/images/professional_connections.png',
       imageLabel:
           'FaceMeet Professional Connections onboarding slide with a video-first introduction scene',
-      overlayWidget: _PosterCropOverlay(
-        imageAsset: 'assets/images/professional_connections.png',
-        imageLabel: 'Professional video-first introduction scene',
-      ),
     ),
     _SlideData(
-      headline1: '',
-      headline1Coral: 'Friendship',
-      headline2: '',
-      subtitle:
-          'Find people you genuinely click with through short video-first introductions.',
+      fullScreenAsset: 'assets/images/friendship.png',
       imageLabel:
           'FaceMeet Friendship onboarding slide with multiple smiling video-first introductions',
-      overlayWidget: _PosterCropOverlay(
-        imageAsset: 'assets/images/friendship.png',
-        imageLabel: 'Friendship video-first introduction scene',
-      ),
     ),
     _SlideData(
-      headline1: '',
-      headline1Coral: 'Social Connections',
-      headline2: '',
-      subtitle:
-          'Meet real people through short video-first conversations built around shared intent.',
+      fullScreenAsset: 'assets/images/social_connections.png',
       imageLabel:
           'FaceMeet Social Connections onboarding slide with a video-first conversation scene',
-      overlayWidget: _PosterCropOverlay(
-        imageAsset: 'assets/images/social_connections.png',
-        imageLabel: 'Video-first social connection conversation scene',
-      ),
     ),
   ];
 
@@ -177,65 +153,68 @@ class _IntroCarouselScreenState extends State<IntroCarouselScreen> {
             left: 0,
             right: 0,
             bottom: MediaQuery.of(context).padding.bottom + 32,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Dot indicators
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(_slides.length, (i) {
-                    final isActive = i == _currentPage;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOutCubic,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: isActive ? 20 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        color: isActive ? _coral : Colors.white.withAlpha(77),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 24),
+            child: Opacity(
+              opacity: _slides[_currentPage].isPoster ? 0 : 1,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Dot indicators
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(_slides.length, (i) {
+                      final isActive = i == _currentPage;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOutCubic,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: isActive ? 20 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          color: isActive ? _coral : Colors.white.withAlpha(77),
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 24),
 
-                // Next / Get Started button
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerUp: (_) => _handlePwaTap('next pointer', _next),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => _handlePwaTap('next tap', _next),
-                        borderRadius: BorderRadius.circular(32),
-                        child: Ink(
-                          height: 56,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFFE8503A), Color(0xFFD43B25)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(32),
-                            boxShadow: [
-                              BoxShadow(
-                                color: _coral.withAlpha(115),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
+                  // Next / Get Started button
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerUp: (_) => _handlePwaTap('next pointer', _next),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => _handlePwaTap('next tap', _next),
+                          borderRadius: BorderRadius.circular(32),
+                          child: Ink(
+                            height: 56,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFE8503A), Color(0xFFD43B25)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                               ),
-                            ],
-                          ),
-                          child: Center(
-                            child: Text(
-                              isLast ? 'Get Started' : 'Next',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                letterSpacing: 0.3,
+                              borderRadius: BorderRadius.circular(32),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _coral.withAlpha(115),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                isLast ? 'Get Started' : 'Next',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                  letterSpacing: 0.3,
+                                ),
                               ),
                             ),
                           ),
@@ -243,8 +222,8 @@ class _IntroCarouselScreenState extends State<IntroCarouselScreen> {
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -281,40 +260,43 @@ class _IntroCarouselScreenState extends State<IntroCarouselScreen> {
             left: 0,
             right: 0,
             bottom: MediaQuery.of(context).padding.bottom + 32,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(_slides.length, (i) {
-                    final isActive = i == _currentPage;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: isActive ? 20 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        color: isActive ? _coral : Colors.white.withAlpha(77),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _WebIntroButton(
-                    label: isLast ? 'Get Started' : 'Next',
-                    onPressed: () => _handlePwaTap('web next', () {
-                      if (isLast) {
-                        _finish();
-                      } else {
-                        setState(() => _currentPage += 1);
-                      }
+            child: Opacity(
+              opacity: _slides[_currentPage].isPoster ? 0 : 1,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(_slides.length, (i) {
+                      final isActive = i == _currentPage;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: isActive ? 20 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          color: isActive ? _coral : Colors.white.withAlpha(77),
+                        ),
+                      );
                     }),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: _WebIntroButton(
+                      label: isLast ? 'Get Started' : 'Next',
+                      onPressed: () => _handlePwaTap('web next', () {
+                        if (isLast) {
+                          _finish();
+                        } else {
+                          setState(() => _currentPage += 1);
+                        }
+                      }),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -394,21 +376,12 @@ class _WebIntroButton extends StatelessWidget {
 // ─── Slide data model ────────────────────────────────────────────────────────
 
 class _SlideData {
-  final String headline1;
-  final String headline1Coral;
-  final String headline2;
-  final String subtitle;
+  final String? fullScreenAsset;
   final String imageLabel;
-  final Widget overlayWidget;
 
-  const _SlideData({
-    required this.headline1,
-    required this.headline1Coral,
-    required this.headline2,
-    required this.subtitle,
-    required this.imageLabel,
-    required this.overlayWidget,
-  });
+  const _SlideData({required this.fullScreenAsset, required this.imageLabel});
+
+  bool get isPoster => fullScreenAsset?.isNotEmpty == true;
 }
 
 // ─── Single slide page ────────────────────────────────────────────────────────
@@ -418,238 +391,19 @@ class _SlidePage extends StatelessWidget {
 
   const _SlidePage({super.key, required this.slide});
 
-  static const _coral = Color(0xFFE8503A);
   static const _navyBg = Color(0xFF0D0D1A);
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
-
     return Container(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment(0.0, 0.3),
-          radius: 1.2,
-          colors: [Color(0xFF2A1018), _navyBg],
-        ),
-      ),
-      child: Column(
-        children: [
-          SizedBox(height: topPad + 60),
-
-          // FaceMeet logo row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Image.asset(
-                'assets/images/facemeet_splash_logo-1778015584859.png',
-                width: 36,
-                height: 36,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: _coral,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.favorite,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              RichText(
-                text: TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'Face',
-                      style: GoogleFonts.dmSans(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                    TextSpan(
-                      text: 'Meet',
-                      style: GoogleFonts.dmSans(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: _coral,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Headline
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: _HeadlineText(slide: slide),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Subtitle
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              slide.subtitle,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.dmSans(
-                fontSize: 15,
-                color: Colors.white.withAlpha(166),
-                height: 1.55,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Image / illustration area
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: slide.overlayWidget,
-            ),
-          ),
-
-          // Space for bottom controls (dots + button)
-          const SizedBox(height: 130),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeadlineText extends StatelessWidget {
-  final _SlideData slide;
-
-  const _HeadlineText({required this.slide});
-
-  static const _coral = Color(0xFFE8503A);
-
-  @override
-  Widget build(BuildContext context) {
-    return RichText(
-      textAlign: TextAlign.center,
-      text: TextSpan(
-        children: [
-          if (slide.headline1Coral.isNotEmpty && slide.headline1.isEmpty) ...[
-            TextSpan(
-              text: slide.headline1Coral,
-              style: GoogleFonts.dmSans(
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                color: _coral,
-                height: 1.15,
-              ),
-            ),
-            TextSpan(
-              text: slide.headline2,
-              style: GoogleFonts.dmSans(
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                height: 1.15,
-              ),
-            ),
-          ] else ...[
-            TextSpan(
-              text: slide.headline1,
-              style: GoogleFonts.dmSans(
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                height: 1.15,
-              ),
-            ),
-            TextSpan(
-              text: slide.headline1Coral,
-              style: GoogleFonts.dmSans(
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                color: _coral,
-                height: 1.15,
-              ),
-            ),
-            if (slide.headline2.isNotEmpty)
-              TextSpan(
-                text: '\n${slide.headline2}',
-                style: GoogleFonts.dmSans(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  height: 1.15,
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Slide overlays ───────────────────────────────────────────────────────────
-
-class _PosterCropOverlay extends StatelessWidget {
-  final String imageAsset;
-  final String imageLabel;
-
-  const _PosterCropOverlay({
-    required this.imageAsset,
-    required this.imageLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withAlpha(31), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFE8503A).withAlpha(56),
-            blurRadius: 40,
-            spreadRadius: 5,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return ClipRect(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                heightFactor: 0.52,
-                child: Image.asset(
-                  imageAsset,
-                  width: constraints.maxWidth,
-                  fit: BoxFit.fitWidth,
-                  alignment: Alignment.bottomCenter,
-                  semanticLabel: imageLabel,
-                  errorBuilder: (_, __, ___) => Container(
-                    width: constraints.maxWidth,
-                    height: constraints.maxHeight,
-                    color: const Color(0xFF1A1A2E),
-                    child: const Icon(
-                      Icons.videocam,
-                      color: Colors.white24,
-                      size: 60,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+      color: _navyBg,
+      child: Image.asset(
+        slide.fullScreenAsset!,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        width: double.infinity,
+        height: double.infinity,
+        semanticLabel: slide.imageLabel,
       ),
     );
   }
