@@ -590,8 +590,13 @@ class ProfileScreenState extends State<ProfileScreen> {
   // ─── Share helpers ────────────────────────────────────────────────────────
 
   String get _shareMessage =>
-      'Hey, I\'m on FaceMeet — a dating app where you video date before you match. '
-      'No catfish, no wasted time, just real faces first. Join me here: $_referralLink';
+      'I\'m using FaceMeet — a video-first connection app for friendship, professional networking, dating, and events.\n\n'
+      'Join me on Android:\n$_playStoreShareUrl';
+
+  String get _playStoreShareUrl {
+    final link = _referralLink.trim();
+    return link.isNotEmpty ? link : ReferralService.playStoreUrl;
+  }
 
   Future<void> _shareWhatsApp() async {
     final encoded = Uri.encodeComponent(_shareMessage);
@@ -625,159 +630,41 @@ class ProfileScreenState extends State<ProfileScreen> {
     await Share.share(_shareMessage, subject: 'Join me on FaceMeet');
   }
 
-  String _publicProfileUrl(String slug) => 'https://facemeet.app/p/$slug';
-
-  String _publicProfileShareCopy(Map<String, dynamic> profile, String url) {
+  String _publicProfileShareCopy(Map<String, dynamic> profile) {
+    final url = _playStoreShareUrl;
     final intent = SupabaseService.normalizeConnectionIntent(
       profile['connection_intent'] as String?,
     );
     switch (intent) {
       case 'professional':
-        return 'I\'m on FaceMeet for Professional Connections. Spark me here: $url';
+        return 'I\'m on FaceMeet for Professional Connections. Download the Android app and Spark me there:\n$url';
       case 'friendship':
-        return 'I\'m on FaceMeet for Friendship. Spark me here: $url';
+        return 'I\'m on FaceMeet for Friendship. Download the Android app and Spark me there:\n$url';
       case 'dating':
-        return 'I\'m on FaceMeet for Dating. Spark me here: $url';
+        return 'I\'m on FaceMeet for Dating. Download the Android app and Spark me there:\n$url';
       case 'open_to_all':
-        return 'I\'m on FaceMeet for real connections. Spark me here: $url';
+        return 'I\'m on FaceMeet for real connections. Download the Android app and Spark me there:\n$url';
       default:
-        return 'I\'m on FaceMeet. Spark me here: $url';
+        return 'I\'m on FaceMeet. Download the Android app and Spark me there:\n$url';
     }
   }
 
   Future<void> _sharePublicProfile(Map<String, dynamic> profile) async {
     if (_publicProfileActionInProgress) return;
-
-    final isEnabled = profile['public_profile_enabled'] == true;
-    var slug = profile['public_profile_slug']?.toString().trim() ?? '';
-
-    if (!isEnabled || slug.isEmpty) {
-      final confirmed = await _confirmEnablePublicProfile();
-      if (confirmed != true || !mounted) return;
-
-      setState(() => _publicProfileActionInProgress = true);
-      try {
-        final result = await SupabaseService.instance.enableMyPublicProfile();
-        slug = result['slug']?.toString() ?? '';
-        if (slug.isEmpty) throw Exception('No public profile slug returned.');
-        profile['public_profile_enabled'] = true;
-        profile['public_profile_slug'] = slug;
-        if (mounted) {
-          setState(() => _publicProfileActionInProgress = false);
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() => _publicProfileActionInProgress = false);
-          _showProfileSnack(
-            'Could not enable public profile: ${e.toString().replaceFirst('Exception: ', '')}',
-            isError: true,
-          );
-        }
-        return;
-      }
-    }
-
-    final url = _publicProfileUrl(slug);
-    final copy = _publicProfileShareCopy(profile, url);
+    final copy = _publicProfileShareCopy(profile);
     try {
       await Share.share(copy, subject: 'My FaceMeet profile');
     } catch (e) {
-      await Clipboard.setData(ClipboardData(text: url));
+      await Clipboard.setData(ClipboardData(text: _playStoreShareUrl));
       if (mounted) {
-        _showProfileSnack('Share sheet unavailable. Link copied instead.');
+        _showProfileSnack('Share sheet unavailable. Google Play link copied.');
       }
     }
   }
 
-  Future<bool?> _confirmEnablePublicProfile() {
-    return showModalBottomSheet<bool>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.all(14),
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF17171F),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: AppTheme.borderGlass),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x66000000),
-                blurRadius: 30,
-                offset: Offset(0, 18),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Make your profile shareable?',
-                style: GoogleFonts.dmSans(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'People with your link will be able to see your first name, profile video or thumbnail, connection intent, About Me, and safe location details. You can turn this off anytime.',
-                style: GoogleFonts.dmSans(
-                  fontSize: 13,
-                  color: AppTheme.textSecondary,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: Text(
-                    'Make Shareable',
-                    style: GoogleFonts.dmSans(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: Text(
-                    'Cancel',
-                    style: GoogleFonts.dmSans(
-                      color: AppTheme.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _copyPublicProfileLink(Map<String, dynamic> profile) async {
-    final slug = profile['public_profile_slug']?.toString().trim() ?? '';
-    if (slug.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: _publicProfileUrl(slug)));
-    if (mounted) _showProfileSnack('Public profile link copied');
+    await Clipboard.setData(ClipboardData(text: _playStoreShareUrl));
+    if (mounted) _showProfileSnack('Google Play link copied');
   }
 
   Future<void> _disablePublicProfile(Map<String, dynamic> profile) async {
@@ -1763,8 +1650,8 @@ class ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 2),
                         Text(
                           hasLink
-                              ? 'Your shareable FaceMeet link is active.'
-                              : 'Create a safe link for people to Spark you.',
+                              ? 'Share FaceMeet on Android. Your public page can still be disabled below.'
+                              : 'Share FaceMeet on Android so people can find you in the app.',
                           style: GoogleFonts.dmSans(
                             fontSize: 12,
                             color: AppTheme.textMuted,
@@ -1789,7 +1676,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    _publicProfileUrl(slug),
+                    _playStoreShareUrl,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.dmSans(

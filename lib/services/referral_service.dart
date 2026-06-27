@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// ReferralService — handles all referral logic:
@@ -10,6 +12,12 @@ class ReferralService {
   static ReferralService? _instance;
   static ReferralService get instance => _instance ??= ReferralService._();
   ReferralService._();
+
+  static const String playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.ononobi.facemeet';
+  static const MethodChannel _installReferrerChannel = MethodChannel(
+    'com.ononobi.facemeet/install_referrer',
+  );
 
   SupabaseClient get _client => Supabase.instance.client;
   String? get _uid => _client.auth.currentUser?.id;
@@ -54,11 +62,53 @@ class ReferralService {
   /// Returns the referral link for the current user.
   Future<String> getReferralLink() async {
     final uid = _uid;
-    if (uid == null) return 'https://app.facemeet.app/';
+    if (uid == null) return playStoreUrl;
 
     final code = await getOrCreateReferralCode();
-    if (code == null || code.isEmpty) return 'https://app.facemeet.app/';
-    return 'https://app.facemeet.app/?ref=${Uri.encodeComponent(code)}';
+    if (code == null || code.isEmpty) return playStoreUrl;
+    return playStoreUrlWithReferral(code);
+  }
+
+  static String playStoreUrlWithReferral(String referralCode) {
+    final code = referralCode.trim();
+    if (code.isEmpty) return playStoreUrl;
+    return '$playStoreUrl&referrer=${Uri.encodeComponent('ref=$code')}';
+  }
+
+  /// Reads Google Play's install referrer on Android and stores any referral
+  /// code for the existing onboarding apply flow. This is a no-op on web/iOS.
+  Future<void> capturePlayInstallReferrer() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final raw = await _installReferrerChannel.invokeMethod<String>(
+        'getInstallReferrer',
+      );
+      final code = _extractReferralCodeFromReferrer(raw);
+      if (code == null || code.isEmpty) {
+        debugPrint('REFERRAL: Play install referrer code found no');
+        return;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_referral_code', code);
+      debugPrint('REFERRAL: Play install referrer code stored yes');
+    } catch (e) {
+      debugPrint('REFERRAL: Play install referrer unavailable — $e');
+    }
+  }
+
+  String? _extractReferralCodeFromReferrer(String? raw) {
+    final value = raw?.trim();
+    if (value == null || value.isEmpty) return null;
+    try {
+      final params = Uri.splitQueryString(value);
+      final ref = params['ref']?.trim();
+      if (ref != null && ref.isNotEmpty) return ref;
+      final referralCode = params['referral_code']?.trim();
+      if (referralCode != null && referralCode.isNotEmpty) return referralCode;
+    } catch (_) {
+      // Some referrers are raw campaign tokens rather than query strings.
+    }
+    return value.contains('=') ? null : value;
   }
 
   // ─── Username ────────────────────────────────────────────────────────────

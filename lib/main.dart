@@ -15,6 +15,7 @@ import './providers/subscription_provider.dart';
 import './services/presence_service.dart';
 import './services/android_diagnostics_service.dart';
 import './services/push_notification_service.dart';
+import './services/referral_service.dart';
 import './services/revenuecat_service.dart';
 import './services/supabase_service.dart';
 import './services/install_gate_service.dart';
@@ -463,6 +464,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _captureReferralFromLaunchUrl();
+    unawaited(ReferralService.instance.capturePlayInstallReferrer());
     unawaited(_recoverPendingReferralCodeFromWebStorage());
     _setupDeepLinkHandler();
 
