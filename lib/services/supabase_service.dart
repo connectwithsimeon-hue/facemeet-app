@@ -379,6 +379,46 @@ class SupabaseService {
     await client.from('users').update(data).eq('id', uid);
   }
 
+  Future<Map<String, dynamic>> enableMyPublicProfile() async {
+    final uid = currentUserId;
+    if (uid == null) {
+      throw Exception('You must be signed in to share your profile.');
+    }
+
+    final response = await client.rpc('enable_my_public_profile');
+    final row = _firstRpcRow(response);
+    final slug = row['slug']?.toString().trim();
+    if (slug == null || slug.isEmpty) {
+      throw Exception('Could not create your public profile link.');
+    }
+
+    return {
+      'slug': slug,
+      'public_url': 'https://facemeet.app/p/$slug',
+      'public_path': row['public_path']?.toString() ?? '/p/$slug',
+      'public_profile_enabled': row['public_profile_enabled'] == true,
+    };
+  }
+
+  Future<void> disableMyPublicProfile() async {
+    final uid = currentUserId;
+    if (uid == null) {
+      throw Exception('You must be signed in to manage your public profile.');
+    }
+
+    await client.rpc('disable_my_public_profile');
+  }
+
+  Map<String, dynamic> _firstRpcRow(dynamic response) {
+    if (response is List && response.isNotEmpty && response.first is Map) {
+      return Map<String, dynamic>.from(response.first as Map);
+    }
+    if (response is Map) {
+      return Map<String, dynamic>.from(response);
+    }
+    return <String, dynamic>{};
+  }
+
   /// Update onboarding step data and optionally mark complete
   Future<void> saveOnboardingStep(
     Map<String, dynamic> data, {

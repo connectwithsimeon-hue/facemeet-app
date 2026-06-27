@@ -58,6 +58,7 @@ class ProfileScreenState extends State<ProfileScreen> {
   bool _showNotificationSettings = false;
   bool _notificationActionInProgress = false;
   WebPushSetupResult? _notificationState;
+  bool _publicProfileActionInProgress = false;
 
   RealtimeChannel? _matchesRealtimeChannel;
 
@@ -624,6 +625,231 @@ class ProfileScreenState extends State<ProfileScreen> {
     await Share.share(_shareMessage, subject: 'Join me on FaceMeet');
   }
 
+  String _publicProfileUrl(String slug) => 'https://facemeet.app/p/$slug';
+
+  String _publicProfileShareCopy(Map<String, dynamic> profile, String url) {
+    final intent = SupabaseService.normalizeConnectionIntent(
+      profile['connection_intent'] as String?,
+    );
+    switch (intent) {
+      case 'professional':
+        return 'I\'m on FaceMeet for Professional Connections. Spark me here: $url';
+      case 'friendship':
+        return 'I\'m on FaceMeet for Friendship. Spark me here: $url';
+      case 'dating':
+        return 'I\'m on FaceMeet for Dating. Spark me here: $url';
+      case 'open_to_all':
+        return 'I\'m on FaceMeet for real connections. Spark me here: $url';
+      default:
+        return 'I\'m on FaceMeet. Spark me here: $url';
+    }
+  }
+
+  Future<void> _sharePublicProfile(Map<String, dynamic> profile) async {
+    if (_publicProfileActionInProgress) return;
+
+    final isEnabled = profile['public_profile_enabled'] == true;
+    var slug = profile['public_profile_slug']?.toString().trim() ?? '';
+
+    if (!isEnabled || slug.isEmpty) {
+      final confirmed = await _confirmEnablePublicProfile();
+      if (confirmed != true || !mounted) return;
+
+      setState(() => _publicProfileActionInProgress = true);
+      try {
+        final result = await SupabaseService.instance.enableMyPublicProfile();
+        slug = result['slug']?.toString() ?? '';
+        if (slug.isEmpty) throw Exception('No public profile slug returned.');
+        profile['public_profile_enabled'] = true;
+        profile['public_profile_slug'] = slug;
+        if (mounted) {
+          setState(() => _publicProfileActionInProgress = false);
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _publicProfileActionInProgress = false);
+          _showProfileSnack(
+            'Could not enable public profile: ${e.toString().replaceFirst('Exception: ', '')}',
+            isError: true,
+          );
+        }
+        return;
+      }
+    }
+
+    final url = _publicProfileUrl(slug);
+    final copy = _publicProfileShareCopy(profile, url);
+    try {
+      await Share.share(copy, subject: 'My FaceMeet profile');
+    } catch (e) {
+      await Clipboard.setData(ClipboardData(text: url));
+      if (mounted) {
+        _showProfileSnack('Share sheet unavailable. Link copied instead.');
+      }
+    }
+  }
+
+  Future<bool?> _confirmEnablePublicProfile() {
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF17171F),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppTheme.borderGlass),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x66000000),
+                blurRadius: 30,
+                offset: Offset(0, 18),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Make your profile shareable?',
+                style: GoogleFonts.dmSans(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'People with your link will be able to see your first name, profile video or thumbnail, connection intent, About Me, and safe location details. You can turn this off anytime.',
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(
+                    'Make Shareable',
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.dmSans(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _copyPublicProfileLink(Map<String, dynamic> profile) async {
+    final slug = profile['public_profile_slug']?.toString().trim() ?? '';
+    if (slug.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _publicProfileUrl(slug)));
+    if (mounted) _showProfileSnack('Public profile link copied');
+  }
+
+  Future<void> _disablePublicProfile(Map<String, dynamic> profile) async {
+    if (_publicProfileActionInProgress) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Disable public link?',
+          style: GoogleFonts.dmSans(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          'Your public profile page will stop showing useful profile details. You can make it shareable again later.',
+          style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Disable',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.error,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _publicProfileActionInProgress = true);
+    try {
+      await SupabaseService.instance.disableMyPublicProfile();
+      profile['public_profile_enabled'] = false;
+      if (mounted) {
+        setState(() => _publicProfileActionInProgress = false);
+        _showProfileSnack('Public profile link disabled');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _publicProfileActionInProgress = false);
+        _showProfileSnack(
+          'Could not disable public link: ${e.toString().replaceFirst('Exception: ', '')}',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  void _showProfileSnack(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.dmSans()),
+        backgroundColor: isError ? AppTheme.error : AppTheme.sparkGreen,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   Future<void> _inviteContacts() async {
     final status = await Permission.contacts.request();
     if (!status.isGranted) {
@@ -766,6 +992,7 @@ class ProfileScreenState extends State<ProfileScreen> {
     final city = profile['city'] ?? '';
     final videoUrl = profile['profile_video_url'] ?? '';
     final isVerified = profile['verification_status'] == 'verified';
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     if (isTablet) {
       return Row(
@@ -784,7 +1011,8 @@ class ProfileScreenState extends State<ProfileScreen> {
           ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 120),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(24, 32, 24, 120 + keyboardInset),
               child: _buildInfoSection(profile),
             ),
           ),
@@ -793,6 +1021,8 @@ class ProfileScreenState extends State<ProfileScreen> {
     }
 
     return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.only(bottom: keyboardInset),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -896,6 +1126,9 @@ class ProfileScreenState extends State<ProfileScreen> {
 
         // Invite Friends card
         _buildInviteFriendsCard(),
+        const SizedBox(height: 20),
+
+        _buildPublicProfileCard(profile),
         const SizedBox(height: 20),
 
         KeyedSubtree(
@@ -1063,7 +1296,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                   size: 20,
                 ),
                 subtitleBuilder: (_) => Text(
-                  'Request invite-only access to curated Dallas event drops.',
+                  'Request invite-only access to curated FaceMeet events.',
                   style: GoogleFonts.dmSans(
                     fontSize: 12,
                     color: AppTheme.textMuted,
@@ -1475,6 +1708,175 @@ class ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPublicProfileCard(Map<String, dynamic> profile) {
+    final enabled = profile['public_profile_enabled'] == true;
+    final slug = profile['public_profile_slug']?.toString().trim() ?? '';
+    final hasLink = enabled && slug.isNotEmpty;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceGlass,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.borderGlass, width: 1),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withAlpha(30),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.ios_share_rounded,
+                      color: AppTheme.primary,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Public Profile',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          hasLink
+                              ? 'Your shareable FaceMeet link is active.'
+                              : 'Create a safe link for people to Spark you.',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (hasLink) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A1E),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _publicProfileUrl(slug),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton.icon(
+                  onPressed: _publicProfileActionInProgress
+                      ? null
+                      : () => _sharePublicProfile(profile),
+                  icon: _publicProfileActionInProgress
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.ios_share_rounded, size: 18),
+                  label: Text(
+                    'Share My FaceMeet Profile',
+                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w800),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppTheme.surfaceGlass,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              if (hasLink) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _publicProfileActionInProgress
+                            ? null
+                            : () => _copyPublicProfileLink(profile),
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        label: Text(
+                          'Copy Link',
+                          style: GoogleFonts.dmSans(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: AppTheme.borderGlass),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: _publicProfileActionInProgress
+                            ? null
+                            : () => _disablePublicProfile(profile),
+                        child: Text(
+                          'Disable Link',
+                          style: GoogleFonts.dmSans(
+                            color: AppTheme.error,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

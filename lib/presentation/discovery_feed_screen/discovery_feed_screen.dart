@@ -708,15 +708,8 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
           ),
         ),
         const SizedBox(height: 12),
-        _buildIntentFilterRow(),
+        _buildTopActionRow(),
         const SizedBox(height: 12),
-        if (_hasUpcomingEvents) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _buildEventsPromoCard(),
-          ),
-          const SizedBox(height: 12),
-        ],
         // Card stack
         Expanded(child: Center(child: _buildCardArea(size, isTablet))),
         SizedBox(height: isTablet ? 16 : 90),
@@ -724,62 +717,30 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     );
   }
 
-  Widget _buildEventsPromoCard() {
+  Widget _buildCompactEventsAction() {
     return GestureDetector(
       onTap: () => Navigator.pushNamed(context, AppRoutes.eventsScreen),
       child: Container(
-        width: double.infinity,
+        height: 38,
         decoration: BoxDecoration(
           color: AppTheme.surfaceGlass,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(999),
           border: Border.all(color: AppTheme.borderGlass),
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: const Color(0x22E8503A),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.event_available_rounded,
-                color: AppTheme.primary,
-                size: 21,
-              ),
+            const Icon(
+              Icons.event_available_rounded,
+              color: AppTheme.primary,
+              size: 16,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Upcoming FaceMeet Events',
-                    style: GoogleFonts.dmSans(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    'Request access to curated FaceMeet social events.',
-                    style: GoogleFonts.dmSans(
-                      color: AppTheme.textMuted,
-                      fontSize: 11,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             Text(
-              'View Events',
+              'Events',
               style: GoogleFonts.dmSans(
-                color: AppTheme.primary,
+                color: Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
               ),
@@ -899,29 +860,48 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     );
   }
 
-  Widget _buildIntentFilterRow() {
+  Widget _buildTopActionRow() {
     final filters = _availableIntentFiltersForViewer(_viewerConnectionIntent);
+    final showFilters = filters.length > 1;
 
-    if (filters.length <= 1) {
+    if (!showFilters && !_hasUpcomingEvents) {
       return const SizedBox.shrink();
     }
 
     return SizedBox(
       height: 38,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        scrollDirection: Axis.horizontal,
-        itemBuilder: (context, index) {
-          final filter = filters[index];
-          return _IntentFilterChip(
-            label: filter.label,
-            isSelected: _selectedIntentFilter == filter.value,
-            onTap: () => _changeIntentFilter(filter.value),
-          );
-        },
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemCount: filters.length,
+      child: Row(
+        children: [
+          if (showFilters)
+            Expanded(child: _buildIntentFilterRow(filters))
+          else
+            const Spacer(),
+          if (_hasUpcomingEvents) ...[
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(right: 20),
+              child: _buildCompactEventsAction(),
+            ),
+          ],
+        ],
       ),
+    );
+  }
+
+  Widget _buildIntentFilterRow(List<_IntentFilterOption> filters) {
+    return ListView.separated(
+      padding: const EdgeInsets.only(left: 20),
+      scrollDirection: Axis.horizontal,
+      itemBuilder: (context, index) {
+        final filter = filters[index];
+        return _IntentFilterChip(
+          label: filter.label,
+          isSelected: _selectedIntentFilter == filter.value,
+          onTap: () => _changeIntentFilter(filter.value),
+        );
+      },
+      separatorBuilder: (_, __) => const SizedBox(width: 8),
+      itemCount: filters.length,
     );
   }
 
