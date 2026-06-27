@@ -630,41 +630,96 @@ class ProfileScreenState extends State<ProfileScreen> {
     await Share.share(_shareMessage, subject: 'Join me on FaceMeet');
   }
 
-  String _publicProfileShareCopy(Map<String, dynamic> profile) {
-    final url = _playStoreShareUrl;
+  String _publicProfileUrlFromSlug(String slug) =>
+      'https://facemeet.app/p/$slug';
+
+  Future<String> _ensurePublicProfileUrl(Map<String, dynamic> profile) async {
+    final enabled = profile['public_profile_enabled'] == true;
+    final existingSlug =
+        profile['public_profile_slug']?.toString().trim() ?? '';
+    if (enabled && existingSlug.isNotEmpty) {
+      return _publicProfileUrlFromSlug(existingSlug);
+    }
+
+    setState(() => _publicProfileActionInProgress = true);
+    try {
+      final publicProfile = await SupabaseService.instance
+          .enableMyPublicProfile();
+      final slug = publicProfile['slug']?.toString().trim() ?? '';
+      final url =
+          publicProfile['public_url']?.toString().trim() ??
+          _publicProfileUrlFromSlug(slug);
+      if (slug.isEmpty || url.isEmpty) {
+        throw Exception('Could not create your public profile link.');
+      }
+      profile['public_profile_slug'] = slug;
+      profile['public_profile_enabled'] =
+          publicProfile['public_profile_enabled'] == true;
+      return url;
+    } finally {
+      if (mounted) {
+        setState(() => _publicProfileActionInProgress = false);
+      }
+    }
+  }
+
+  String _publicProfileShareCopy(Map<String, dynamic> profile, String url) {
     final intent = SupabaseService.normalizeConnectionIntent(
       profile['connection_intent'] as String?,
     );
     switch (intent) {
       case 'professional':
-        return 'I\'m on FaceMeet for Professional Connections. Download the Android app and Spark me there:\n$url';
+        return 'I\'m on FaceMeet for Professional Connections. Watch my profile video and Spark me here:\n$url';
       case 'friendship':
-        return 'I\'m on FaceMeet for Friendship. Download the Android app and Spark me there:\n$url';
+        return 'I\'m on FaceMeet for Friendship. Watch my profile video and Spark me here:\n$url';
       case 'dating':
-        return 'I\'m on FaceMeet for Social Connections. Download the Android app and Spark me there:\n$url';
+        return 'I\'m on FaceMeet for Social Connections. Watch my profile video and Spark me here:\n$url';
       case 'open_to_all':
-        return 'I\'m on FaceMeet for real connections. Download the Android app and Spark me there:\n$url';
+        return 'I\'m on FaceMeet for real connections. Watch my profile video and Spark me here:\n$url';
       default:
-        return 'I\'m on FaceMeet. Download the Android app and Spark me there:\n$url';
+        return 'Watch my FaceMeet profile video and Spark me here:\n$url';
     }
   }
 
   Future<void> _sharePublicProfile(Map<String, dynamic> profile) async {
     if (_publicProfileActionInProgress) return;
-    final copy = _publicProfileShareCopy(profile);
     try {
+      final publicUrl = await _ensurePublicProfileUrl(profile);
+      final copy = _publicProfileShareCopy(profile, publicUrl);
       await Share.share(copy, subject: 'My FaceMeet profile');
     } catch (e) {
-      await Clipboard.setData(ClipboardData(text: _playStoreShareUrl));
+      final slug = profile['public_profile_slug']?.toString().trim() ?? '';
+      var copiedFallback = false;
+      if (slug.isNotEmpty) {
+        await Clipboard.setData(
+          ClipboardData(text: _publicProfileUrlFromSlug(slug)),
+        );
+        copiedFallback = true;
+      }
       if (mounted) {
-        _showProfileSnack('Share sheet unavailable. Google Play link copied.');
+        _showProfileSnack(
+          copiedFallback
+              ? 'Share sheet unavailable. Public profile link copied.'
+              : 'Could not create your public profile link.',
+        );
       }
     }
   }
 
   Future<void> _copyPublicProfileLink(Map<String, dynamic> profile) async {
-    await Clipboard.setData(ClipboardData(text: _playStoreShareUrl));
-    if (mounted) _showProfileSnack('Google Play link copied');
+    if (_publicProfileActionInProgress) return;
+    try {
+      final publicUrl = await _ensurePublicProfileUrl(profile);
+      await Clipboard.setData(ClipboardData(text: publicUrl));
+      if (mounted) _showProfileSnack('Public profile link copied');
+    } catch (e) {
+      if (mounted) {
+        _showProfileSnack(
+          'Could not copy public profile link: ${e.toString().replaceFirst('Exception: ', '')}',
+          isError: true,
+        );
+      }
+    }
   }
 
   Future<void> _disablePublicProfile(Map<String, dynamic> profile) async {
@@ -1650,11 +1705,11 @@ class ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 2),
                         Text(
                           hasLink
-                              ? 'Share FaceMeet on Android. Your public page can still be disabled below.'
-                              : 'Share FaceMeet on Android so people can find you in the app.',
+                              ? 'Share your public video page so people can watch your intro and Spark you.'
+                              : 'Create a public video page so people can watch your intro and Spark you.',
                           style: GoogleFonts.dmSans(
                             fontSize: 12,
-                            color: AppTheme.textMuted,
+                            color: Colors.white70,
                             height: 1.35,
                           ),
                         ),
@@ -1676,7 +1731,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    _playStoreShareUrl,
+                    _publicProfileUrlFromSlug(slug),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.dmSans(
@@ -1705,8 +1760,13 @@ class ProfileScreenState extends State<ProfileScreen> {
                         )
                       : const Icon(Icons.ios_share_rounded, size: 18),
                   label: Text(
-                    'Share My FaceMeet Profile',
-                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w800),
+                    'Share My Profile Video',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primary,
@@ -2607,7 +2667,7 @@ class _ShimmerStatItemState extends State<_ShimmerStatItem>
             width: 20,
             height: 20,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(_anim.value * 0.3),
+              color: Colors.white.withValues(alpha: _anim.value * 0.3),
               borderRadius: BorderRadius.circular(4),
             ),
           ),
@@ -2616,7 +2676,7 @@ class _ShimmerStatItemState extends State<_ShimmerStatItem>
             width: 32,
             height: 20,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(_anim.value * 0.4),
+              color: Colors.white.withValues(alpha: _anim.value * 0.4),
               borderRadius: BorderRadius.circular(4),
             ),
           ),
@@ -2625,7 +2685,7 @@ class _ShimmerStatItemState extends State<_ShimmerStatItem>
             width: 56,
             height: 10,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(_anim.value * 0.2),
+              color: Colors.white.withValues(alpha: _anim.value * 0.2),
               borderRadius: BorderRadius.circular(4),
             ),
           ),
