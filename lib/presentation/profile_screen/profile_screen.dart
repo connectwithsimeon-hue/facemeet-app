@@ -424,7 +424,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Active subscriptions are not cancelled in FaceMeet. Manage subscriptions through the Apple App Store or Google Play.',
+                _subscriptionManagementCopy,
                 style: GoogleFonts.dmSans(
                   color: AppTheme.textSecondary,
                   height: 1.45,
@@ -589,9 +589,26 @@ class ProfileScreenState extends State<ProfileScreen> {
 
   // ─── Share helpers ────────────────────────────────────────────────────────
 
+  String get _subscriptionManagementCopy {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'Active subscriptions are not cancelled in FaceMeet. Manage subscriptions through the App Store.';
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return 'Active subscriptions are not cancelled in FaceMeet. Manage subscriptions through Google Play.';
+    }
+    return 'Active subscriptions are not cancelled in FaceMeet. Manage subscriptions through your app store account.';
+  }
+
+  String get _inviteShareUrl {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'https://facemeet.app';
+    }
+    return _playStoreShareUrl;
+  }
+
   String get _shareMessage =>
       'I\'m using FaceMeet — a video-first social connection app for professional connections, friendship, social connections, and live topics.\n\n'
-      'Join me on Android:\n$_playStoreShareUrl';
+      'Join me on FaceMeet:\n$_inviteShareUrl';
 
   String get _playStoreShareUrl {
     final link = _referralLink.trim();
@@ -1889,7 +1906,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              _referralLink,
+                              _inviteShareUrl,
                               style: GoogleFonts.dmSans(
                                 fontSize: 12,
                                 color: Colors.white70,
@@ -1902,7 +1919,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                           GestureDetector(
                             onTap: () {
                               Clipboard.setData(
-                                ClipboardData(text: _referralLink),
+                                ClipboardData(text: _inviteShareUrl),
                               );
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(

@@ -51,6 +51,8 @@
 	<string>We need camera access for your Spark Sessions</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need microphone access for your Spark Sessions</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>FaceMeet uses your photo library only when you choose an existing video for your profile.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>We use your contacts to help you invite friends to FaceMeet.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
