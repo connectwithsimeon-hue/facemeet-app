@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ class DailyCallView extends StatefulWidget {
   final VoidCallback? onCallConnected;
   final void Function(String error)? onCallError;
   final VoidCallback? onRemoteParticipantJoined;
+  final Future<Map<String, String>?> Function()? onRefreshDailyAccess;
 
   const DailyCallView({
     super.key,
@@ -25,6 +27,7 @@ class DailyCallView extends StatefulWidget {
     this.onCallConnected,
     this.onCallError,
     this.onRemoteParticipantJoined,
+    this.onRefreshDailyAccess,
   });
 
   @override
@@ -38,6 +41,9 @@ class DailyCallViewState extends State<DailyCallView> {
   bool _connected = false;
   String? _error;
   int _joinAttempt = 0;
+  late String _activeRoomUrl;
+  late String _activeMeetingToken;
+  bool _iosAccessRefreshAttempted = false;
   static const int _maxJoinAttempts = 3;
 
   /// Bug 2 fix: Explicit leave() method that can be called BEFORE the widget
@@ -110,16 +116,32 @@ class DailyCallViewState extends State<DailyCallView> {
   @override
   void initState() {
     super.initState();
+    _activeRoomUrl = widget.roomUrl.trim();
+    _activeMeetingToken = widget.meetingToken.trim();
     debugPrint(
-      'DAILY CALL VIEW: initState — roomUrl=${widget.roomUrl}, token_present=${widget.meetingToken.isNotEmpty}',
+      'DAILY CALL VIEW: initState — platform=$_platformName, room=${_safeRoomHostPath(_activeRoomUrl)}, room_present=${_activeRoomUrl.isNotEmpty}, token_present=${_activeMeetingToken.isNotEmpty}',
     );
     _initCall();
+  }
+
+  @override
+  void didUpdateWidget(covariant DailyCallView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.roomUrl != widget.roomUrl ||
+        oldWidget.meetingToken != widget.meetingToken) {
+      _activeRoomUrl = widget.roomUrl.trim();
+      _activeMeetingToken = widget.meetingToken.trim();
+      _iosAccessRefreshAttempted = false;
+      debugPrint(
+        'DAILY CALL VIEW: access payload updated — platform=$_platformName, room=${_safeRoomHostPath(_activeRoomUrl)}, room_present=${_activeRoomUrl.isNotEmpty}, token_present=${_activeMeetingToken.isNotEmpty}',
+      );
+    }
   }
 
   Future<void> _initCall() async {
     _joinAttempt++;
     debugPrint(
-      'SPARK SESSION: Daily join attempt started — attempt=$_joinAttempt/$_maxJoinAttempts',
+      'SPARK SESSION: Daily join attempt started — platform=$_platformName, attempt=$_joinAttempt/$_maxJoinAttempts, room=${_safeRoomHostPath(_activeRoomUrl)}, room_present=${_activeRoomUrl.isNotEmpty}, token_present=${_activeMeetingToken.isNotEmpty}',
     );
     await AndroidDiagnosticsService.instance.setValues({
       'spark_diag_native_daily_join_attempted': 'yes',
@@ -130,6 +152,8 @@ class DailyCallViewState extends State<DailyCallView> {
     });
     debugPrint('DAILY CALL VIEW: creating CallClient');
     try {
+      final roomUri = _roomUriForJoin(_activeRoomUrl);
+
       // Step 1: Create CallClient
       _client = await CallClient.create();
       debugPrint('DAILY CALL VIEW: CallClient created successfully');
@@ -157,11 +181,11 @@ class DailyCallViewState extends State<DailyCallView> {
 
       // Step 4: Join with clientSettings also enforcing camera+mic enabled
       debugPrint(
-        'DAILY CALL VIEW: calling join() with secure token — url=${widget.roomUrl}, token_present=${widget.meetingToken.isNotEmpty}',
+        'DAILY CALL VIEW: calling join() with secure token — platform=$_platformName, room=${_safeRoomHostPath(_activeRoomUrl)}, token_present=${_activeMeetingToken.isNotEmpty}',
       );
       await _client!
           .join(
-            url: Uri.parse(widget.roomUrl),
+            url: roomUri,
             clientSettings: const ClientSettingsUpdate.set(
               inputs: InputSettingsUpdate.set(
                 camera: CameraInputSettingsUpdate.set(
@@ -172,19 +196,68 @@ class DailyCallViewState extends State<DailyCallView> {
                 ),
               ),
             ),
-            token: widget.meetingToken,
+            token: _activeMeetingToken,
           )
           .timeout(const Duration(seconds: 20));
       debugPrint('DAILY CALL VIEW: join() called — waiting for joined state');
     } catch (e) {
-      debugPrint('DAILY CALL VIEW: ERROR during initCall — $e');
+      final safeError = _safeJoinError(e);
+      debugPrint(
+        'DAILY CALL VIEW: ERROR during initCall — platform=$_platformName, room=${_safeRoomHostPath(_activeRoomUrl)}, error=$safeError',
+      );
       final isTimeout =
           e is TimeoutException ||
           e.toString().toLowerCase().contains('timeoutexception') ||
           e.toString().toLowerCase().contains('timeout');
+      final isNoLongerAvailable = _isNoLongerAvailable(e);
       if (isTimeout) {
         debugPrint(
           'SPARK SESSION: Daily join timeout — attempt=$_joinAttempt/$_maxJoinAttempts',
+        );
+      }
+
+      if (Platform.isIOS &&
+          isNoLongerAvailable &&
+          !_iosAccessRefreshAttempted &&
+          widget.onRefreshDailyAccess != null &&
+          mounted) {
+        _iosAccessRefreshAttempted = true;
+        debugPrint(
+          'SPARK SESSION: iOS Daily room no longer available — refreshing server-owned Daily access once',
+        );
+        await AndroidDiagnosticsService.instance.setValues({
+          'spark_diag_ios_daily_access_refresh_attempted': 'yes',
+          'spark_diag_native_daily_join_error_safe': safeError,
+          'spark_diag_waiting_reason': 'iOS Daily access refresh pending',
+        });
+        final refreshed = await widget.onRefreshDailyAccess!.call();
+        final refreshedRoomUrl = refreshed?['roomUrl']?.trim() ?? '';
+        final refreshedMeetingToken = refreshed?['meetingToken']?.trim() ?? '';
+        if (refreshedRoomUrl.isNotEmpty && refreshedMeetingToken.isNotEmpty) {
+          _activeRoomUrl = refreshedRoomUrl;
+          _activeMeetingToken = refreshedMeetingToken;
+          debugPrint(
+            'SPARK SESSION: iOS Daily access refreshed — retrying join with room=${_safeRoomHostPath(_activeRoomUrl)}, token_present=${_activeMeetingToken.isNotEmpty}',
+          );
+          try {
+            await _client?.leave();
+          } catch (_) {}
+          _client = null;
+          if (mounted) {
+            setState(() {
+              _loading = true;
+              _connected = false;
+              _error = null;
+            });
+            await Future.delayed(const Duration(seconds: 1));
+            if (mounted) {
+              await _initCall();
+            }
+          }
+          return;
+        }
+        debugPrint(
+          'SPARK SESSION: iOS Daily access refresh returned no usable room/token',
         );
       }
 
@@ -204,22 +277,75 @@ class DailyCallViewState extends State<DailyCallView> {
       }
 
       if (mounted) {
+        final friendlyError = _friendlyJoinError(e);
         setState(() {
           _loading = false;
-          _error = e.toString();
+          _error = friendlyError;
         });
-        debugPrint('SPARK SESSION: Daily join final failure — $e');
+        debugPrint(
+          'SPARK SESSION: Daily join final failure — platform=$_platformName, error=$safeError',
+        );
         AndroidDiagnosticsService.instance.setValues({
           'native_daily_join_success': 'no',
           'spark_diag_native_daily_join_success': 'no',
-          'spark_diag_native_daily_join_error_safe':
-              AndroidDiagnosticsService.safeError(e),
-          'spark_diag_waiting_reason':
-              AndroidDiagnosticsService.safeError(e),
+          'spark_diag_native_daily_join_error_safe': safeError,
+          'spark_diag_waiting_reason': safeError,
         });
-        widget.onCallError?.call(e.toString());
+        widget.onCallError?.call(friendlyError);
       }
     }
+  }
+
+  String get _platformName {
+    if (Platform.isIOS) return 'ios';
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isMacOS) return 'macos';
+    return 'native';
+  }
+
+  Uri _roomUriForJoin(String rawRoomUrl) {
+    final uri = Uri.parse(rawRoomUrl.trim());
+    if (!Platform.isIOS || (!uri.hasQuery && !uri.hasFragment)) {
+      return uri;
+    }
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : 0,
+      path: uri.path,
+    );
+  }
+
+  String _safeRoomHostPath(String rawRoomUrl) {
+    try {
+      final uri = Uri.parse(rawRoomUrl.trim());
+      final hostPath = '${uri.host}${uri.path}';
+      return hostPath.isEmpty ? 'unavailable' : hostPath;
+    } catch (_) {
+      return 'unavailable';
+    }
+  }
+
+  bool _isNoLongerAvailable(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('nolongeravailable') ||
+        text.contains('no longer available') ||
+        text.contains('apiroomlookup');
+  }
+
+  String _friendlyJoinError(Object error) {
+    if (_isNoLongerAvailable(error)) {
+      return 'This video room is no longer available. Please start or schedule a new Spark Session.';
+    }
+    return error.toString();
+  }
+
+  String _safeJoinError(Object error) {
+    if (_isNoLongerAvailable(error)) {
+      return 'no_longer_available';
+    }
+    return AndroidDiagnosticsService.safeError(error);
   }
 
   void _handleEvent(Event event) {

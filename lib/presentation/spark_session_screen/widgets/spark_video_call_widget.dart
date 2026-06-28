@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/supabase_service.dart';
 import '../../../services/android_diagnostics_service.dart';
+import '../../../services/daily_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/user_safety_actions.dart';
 import './spark_video_webview_stub.dart'
@@ -398,7 +399,9 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
 
   // Fix 3: Called when Daily.co fires any error — show as overlay on top of video, never close the call
   void _onDailyError(String error) {
-    final cleanError = error.replaceFirst('Exception: ', '');
+    final cleanError = _friendlyDailyError(
+      error.replaceFirst('Exception: ', ''),
+    );
     debugPrint(
       'SPARK SESSION: Daily room join failure/error — "$cleanError". Showing as overlay (NOT closing call).',
     );
@@ -417,6 +420,45 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
         _overlayError = cleanError;
       });
     }
+  }
+
+  Future<Map<String, String>?> _refreshDailyAccessForNativeRetry() async {
+    final matchId = widget.matchId?.trim();
+    if (matchId == null || matchId.isEmpty) {
+      debugPrint(
+        'SPARK SESSION: native Daily access refresh skipped — missing matchId',
+      );
+      return null;
+    }
+    debugPrint(
+      'SPARK SESSION: native Daily access refresh requested — matchId=$matchId, sessionKey_present=${widget.sessionKey?.isNotEmpty == true}',
+    );
+    try {
+      final access = await DailyService.instance.getSparkSessionDailyAccess(
+        matchId: matchId,
+        sessionKey: widget.sessionKey,
+      );
+      debugPrint(
+        'SPARK SESSION: native Daily access refresh succeeded — room_present=${access.roomUrl.isNotEmpty}, token_present=${access.meetingToken.isNotEmpty}',
+      );
+      return {'roomUrl': access.roomUrl, 'meetingToken': access.meetingToken};
+    } catch (error) {
+      debugPrint(
+        'SPARK SESSION: native Daily access refresh failed — ${AndroidDiagnosticsService.safeError(error)}',
+      );
+      return null;
+    }
+  }
+
+  String _friendlyDailyError(String error) {
+    final lower = error.toLowerCase();
+    if (lower.contains('nolongavailable') ||
+        lower.contains('nolongeravailable') ||
+        lower.contains('no longer available') ||
+        lower.contains('apiroomlookup')) {
+      return 'This video room is no longer available. Please start or schedule a new Spark Session.';
+    }
+    return error;
   }
 
   // Dismiss the error overlay (user tapped X or it auto-dismisses)
@@ -840,6 +882,7 @@ class _SparkVideoCallWidgetState extends State<SparkVideoCallWidget>
               onCallError: _onDailyError,
               // Hide waiting overlay when remote participant joins
               onRemoteParticipantJoined: _onRemoteParticipantJoined,
+              onRefreshDailyAccess: _refreshDailyAccessForNativeRetry,
             ),
           // Connecting overlay — shown until call state is joined
           if (!kIsWeb && _callConnecting) _buildConnectingOverlay(),

@@ -12,6 +12,7 @@ class DailyCallView extends StatefulWidget {
   final VoidCallback? onCallConnected;
   final void Function(String error)? onCallError;
   final VoidCallback? onRemoteParticipantJoined;
+  final Future<Map<String, String>?> Function()? onRefreshDailyAccess;
 
   const DailyCallView({
     super.key,
@@ -21,6 +22,7 @@ class DailyCallView extends StatefulWidget {
     this.onCallConnected,
     this.onCallError,
     this.onRemoteParticipantJoined,
+    this.onRefreshDailyAccess,
   });
 
   @override
