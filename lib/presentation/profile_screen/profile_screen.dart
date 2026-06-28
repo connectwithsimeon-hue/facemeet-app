@@ -619,23 +619,28 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   String get _inviteShareUrl {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'https://facemeet.app';
-    }
-    return _playStoreShareUrl;
-  }
-
-  String get _shareMessage =>
-      'I\'m using FaceMeet — a video-first social connection app for professional connections, friendship, social connections, and live topics.\n\n'
-      'Join me on FaceMeet:\n$_inviteShareUrl';
-
-  String get _playStoreShareUrl {
     final link = _referralLink.trim();
     return link.isNotEmpty ? link : ReferralService.playStoreUrl;
   }
 
+  String _referralShareMessage(String inviteUrl) =>
+      'Join me on FaceMeet — a video-first way to meet people through Sparks and Live Topics. Use my link:\n$inviteUrl';
+
+  Future<String> _ensureReferralShareUrl() async {
+    final existing = _referralLink.trim();
+    if (existing.isNotEmpty) return existing;
+
+    final link = await ReferralService.instance.getReferralLink();
+    final normalized = link.trim();
+    if (mounted && normalized.isNotEmpty) {
+      setState(() => _referralLink = normalized);
+    }
+    return normalized.isNotEmpty ? normalized : ReferralService.playStoreUrl;
+  }
+
   Future<void> _shareWhatsApp() async {
-    final encoded = Uri.encodeComponent(_shareMessage);
+    final inviteUrl = await _ensureReferralShareUrl();
+    final encoded = Uri.encodeComponent(_referralShareMessage(inviteUrl));
     final uri = Uri.parse('https://wa.me/?text=$encoded');
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -649,7 +654,8 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _shareSms() async {
-    final encoded = Uri.encodeComponent(_shareMessage);
+    final inviteUrl = await _ensureReferralShareUrl();
+    final encoded = Uri.encodeComponent(_referralShareMessage(inviteUrl));
     final uri = Uri.parse('sms:?body=$encoded');
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -663,7 +669,38 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _shareMore() async {
-    await Share.share(_shareMessage, subject: 'Join me on FaceMeet');
+    final inviteUrl = await _ensureReferralShareUrl();
+    final shared = await _shareText(
+      text: _referralShareMessage(inviteUrl),
+      subject: 'Join me on FaceMeet',
+    );
+    if (!shared) {
+      await Clipboard.setData(ClipboardData(text: inviteUrl));
+      if (mounted) _showProfileSnack('Referral link copied');
+    }
+  }
+
+  Rect? _sharePositionOrigin() {
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    return renderObject.localToGlobal(Offset.zero) & renderObject.size;
+  }
+
+  Future<bool> _shareText({
+    required String text,
+    required String subject,
+  }) async {
+    try {
+      final result = await Share.share(
+        text,
+        subject: subject,
+        sharePositionOrigin: _sharePositionOrigin(),
+      );
+      return result.status != ShareResultStatus.unavailable;
+    } catch (e) {
+      debugPrint('SHARE: native share unavailable — $e');
+      return false;
+    }
   }
 
   String _publicProfileUrlFromSlug(String slug) =>
@@ -722,7 +759,18 @@ class ProfileScreenState extends State<ProfileScreen> {
     try {
       final publicUrl = await _ensurePublicProfileUrl(profile);
       final copy = _publicProfileShareCopy(profile, publicUrl);
-      await Share.share(copy, subject: 'My FaceMeet profile');
+      final shared = await _shareText(
+        text: copy,
+        subject: 'My FaceMeet profile',
+      );
+      if (!shared) {
+        await Clipboard.setData(ClipboardData(text: publicUrl));
+        if (mounted) {
+          _showProfileSnack(
+            'Share sheet unavailable. Public profile link copied.',
+          );
+        }
+      }
     } catch (e) {
       final slug = profile['public_profile_slug']?.toString().trim() ?? '';
       var copiedFallback = false;
@@ -842,6 +890,7 @@ class ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
+      final inviteUrl = await _ensureReferralShareUrl();
       final contacts = await FlutterContacts.getContacts(withProperties: true);
       if (!mounted) return;
       showModalBottomSheet(
@@ -850,7 +899,7 @@ class ProfileScreenState extends State<ProfileScreen> {
         backgroundColor: Colors.transparent,
         builder: (_) => _ContactsInviteSheet(
           contacts: contacts,
-          shareMessage: _shareMessage,
+          shareMessage: _referralShareMessage(inviteUrl),
         ),
       );
     } catch (e) {
@@ -1061,14 +1110,28 @@ class ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              IconButton.filledTonal(
-                onPressed: () => _openSettings(profile),
-                icon: const Icon(Icons.settings_rounded),
-                tooltip: 'Settings',
-                style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.surfaceGlass,
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: AppTheme.borderGlass),
+              Tooltip(
+                message: 'Settings',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _openSettings(profile),
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceGlass,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppTheme.borderGlass),
+                      ),
+                      child: const Icon(
+                        Icons.settings_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1183,8 +1246,6 @@ class ProfileScreenState extends State<ProfileScreen> {
             },
           ),
         ),
-        const SizedBox(height: 16),
-        _SettingsEntryCard(onTap: () => _openSettings(profile)),
       ],
     );
   }
@@ -1435,10 +1496,12 @@ class ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(width: 8),
                           GestureDetector(
-                            onTap: () {
-                              Clipboard.setData(
-                                ClipboardData(text: _inviteShareUrl),
+                            onTap: () async {
+                              final inviteUrl = await _ensureReferralShareUrl();
+                              await Clipboard.setData(
+                                ClipboardData(text: inviteUrl),
                               );
+                              if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
@@ -1581,33 +1644,6 @@ class ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SettingsEntryCard extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _SettingsEntryCard({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionCard(
-      title: 'Settings',
-      child: _SettingsRow(
-        icon: Icons.settings_rounded,
-        label: 'Account, notifications, social links',
-        subtitleBuilder: (_) => Text(
-          'Manage privacy, Sparks, support, and account controls.',
-          style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
-        ),
-        trailing: const Icon(
-          Icons.chevron_right_rounded,
-          color: AppTheme.textMuted,
-          size: 20,
-        ),
-        onTap: onTap,
       ),
     );
   }
