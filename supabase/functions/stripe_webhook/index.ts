@@ -13,12 +13,12 @@ const supabase = createClient(
 );
 
 // Spark replenishment per tier per renewal cycle
-// Free: +3 per week (handled client-side via spark_last_replenished_at)
-// Spark+: +3 per day (handled client-side via spark_last_replenished_at)
-// Gold: +10 per day (handled client-side via spark_last_replenished_at)
+// Free: no recurring replenishment; starter Sparks are granted once only.
+// Spark+: +2 per day (handled client-side via spark_last_replenished_at)
+// Gold: +5 per day (handled client-side via spark_last_replenished_at)
 const SPARK_ALLOWANCE: Record<string, number> = {
-  spark_plus: 3,
-  gold: 10,
+  spark_plus: 2,
+  gold: 5,
 };
 
 // Maximum spark balance from tier replenishment only.

@@ -486,7 +486,7 @@ class _PricingScreenState extends State<PricingScreen>
   Widget _buildSubscriptionCard() {
     final features = _isGold
         ? [
-            '10 Spark Sessions every day',
+            '5 daily bonus Sparks',
             'See who Sparked you',
             'Rewind last skip',
             'Advanced filters',
@@ -498,7 +498,7 @@ class _PricingScreenState extends State<PricingScreen>
             '25% off Spark bundles',
           ]
         : [
-            '3 Spark Sessions every day',
+            '2 daily bonus Sparks',
             'See who Sparked you',
             'Rewind last skip',
             'Advanced filters',

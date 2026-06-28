@@ -39,8 +39,8 @@ Map<String, String> get _subscriptionTierMap => {
 
 /// Spark allowance on first subscription purchase (mirrors stripe_webhook).
 const Map<String, int> _subscriptionSparkAllowance = {
-  'spark_plus': 3,
-  'gold': 10,
+  'spark_plus': 2,
+  'gold': 5,
 };
 
 const int _sparkReplenishmentCap = 50;

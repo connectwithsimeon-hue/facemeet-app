@@ -768,9 +768,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (ctx2 != null && ctx2.mounted) {
       String message;
       if (tier == 'gold') {
-        message = 'Welcome to Gold! 🏆 10 Sparks added to your balance!';
+        message = 'Welcome to Gold! 🏆 5 Sparks added to your balance!';
       } else if (tier == 'spark_plus') {
-        message = 'Welcome to Spark+! ⚡ 3 Sparks added to your balance!';
+        message = 'Welcome to Spark+! ⚡ 2 Sparks added to your balance!';
       } else {
         // Webhook may still be processing — show generic success and let
         // the user know sparks will appear shortly.

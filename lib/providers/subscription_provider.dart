@@ -43,9 +43,9 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   /// Replenish sparks based on tier and time since last replenishment.
-  /// - Free: +3 every Monday (weekly)
-  /// - Spark+: +3 every day at midnight
-  /// - Gold: +10 every day at midnight
+  /// - Free: no recurring replenishment; starter Sparks are granted once only.
+  /// - Spark+: +2 every day at midnight
+  /// - Gold: +5 every day at midnight
   /// Cap: tier replenishment only adds up to 50. Bundles are uncapped.
   Future<void> _replenishSparksIfDue(
     String uid,
@@ -65,16 +65,18 @@ class SubscriptionProvider extends ChangeNotifier {
         lastReplenished = DateTime.tryParse(lastReplenishedStr);
       }
 
-      if (tier == 'free' && lastReplenished == null) {
+      if (tier == 'free') {
+        if (lastReplenished == null) {
+          debugPrint(
+            'REPLENISH: Free user has no last_replenished timestamp — marking initialized without adding recurring Sparks',
+          );
+          await Supabase.instance.client
+              .from('users')
+              .update({'spark_last_replenished_at': now.toIso8601String()})
+              .eq('id', uid);
+        }
         debugPrint(
-          'REPLENISH: Free user has no last_replenished timestamp — marking initialized without adding welcome sparks again',
-        );
-        await Supabase.instance.client
-            .from('users')
-            .update({'spark_last_replenished_at': now.toIso8601String()})
-            .eq('id', uid);
-        debugPrint(
-          'WELCOME SPARKS: welcome sparks skipped because already granted',
+          'REPLENISH: Free users do not receive recurring Sparks; starter Sparks are once-only',
         );
         return;
       }
@@ -83,7 +85,7 @@ class SubscriptionProvider extends ChangeNotifier {
       bool shouldReplenish = false;
 
       if (tier == 'gold') {
-        // Gold: +10 per day
+        // Gold: +5 per day
         final lastReplenishedDate = lastReplenished != null
             ? DateTime(
                 lastReplenished.year,
@@ -94,12 +96,12 @@ class SubscriptionProvider extends ChangeNotifier {
         shouldReplenish =
             lastReplenishedDate == null ||
             lastReplenishedDate.isBefore(todayDate);
-        sparksToAdd = 10;
+        sparksToAdd = 5;
         debugPrint(
           'REPLENISH: Gold — lastReplenished=$lastReplenishedDate, today=$todayDate, shouldReplenish=$shouldReplenish',
         );
       } else if (tier == 'spark_plus') {
-        // Spark+: +3 per day
+        // Spark+: +2 per day
         final lastReplenishedDate = lastReplenished != null
             ? DateTime(
                 lastReplenished.year,
@@ -110,28 +112,9 @@ class SubscriptionProvider extends ChangeNotifier {
         shouldReplenish =
             lastReplenishedDate == null ||
             lastReplenishedDate.isBefore(todayDate);
-        sparksToAdd = 3;
+        sparksToAdd = 2;
         debugPrint(
           'REPLENISH: Spark+ — lastReplenished=$lastReplenishedDate, today=$todayDate, shouldReplenish=$shouldReplenish',
-        );
-      } else {
-        // Free: +3 every Monday
-        final currentMonday = todayDate.subtract(
-          Duration(days: todayDate.weekday - 1),
-        );
-        final lastReplenishedDate = lastReplenished != null
-            ? DateTime(
-                lastReplenished.year,
-                lastReplenished.month,
-                lastReplenished.day,
-              )
-            : null;
-        shouldReplenish =
-            lastReplenishedDate == null ||
-            lastReplenishedDate.isBefore(currentMonday);
-        sparksToAdd = 3;
-        debugPrint(
-          'REPLENISH: Free — lastReplenished=$lastReplenishedDate, currentMonday=$currentMonday, shouldReplenish=$shouldReplenish',
         );
       }
 

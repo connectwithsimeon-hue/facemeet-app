@@ -1181,14 +1181,14 @@ class _SparkLimitBottomSheet extends StatelessWidget {
     final String subtitle;
     if (isFree) {
       subtitle =
-          'You\'ve used all 3 free Sparks for this week. Buy a bundle or go monthly to keep sparking!';
+          'You\'re out of Sparks. Buy a bundle, invite friends, or go monthly to keep connecting.';
     } else if (isSparkPlus) {
       subtitle =
-          'You\'ve used all 3 Sparks for today. Your daily allowance resets at midnight, or buy more now!';
+          'You\'ve used your 2 daily bonus Sparks. Your daily bonus resets at midnight, or buy more now.';
     } else {
       // Gold
       subtitle =
-          'You\'ve used all 10 Sparks for today. Your daily allowance resets at midnight, or buy more now!';
+          'You\'ve used your 5 daily bonus Sparks. Your daily bonus resets at midnight, or buy more now.';
     }
 
     return Container(
@@ -1302,7 +1302,7 @@ class _SparkLimitBottomSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Unlock 10 Sparks per day with Gold at \$29.99/mo',
+                        'Unlock 5 daily bonus Sparks with Gold at \$29.99/mo',
                         style: GoogleFonts.dmSans(
                           fontSize: 11,
                           color: const Color(0xFF777777),
@@ -1341,7 +1341,7 @@ class _SparkLimitBottomSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Get 3 Sparks every day with Spark+ at \$14.99/mo',
+                        'Get 2 daily bonus Sparks with Spark+ at \$14.99/mo',
                         style: GoogleFonts.dmSans(
                           fontSize: 11,
                           color: const Color(0xFFFF4458).withAlpha(140),
@@ -1361,7 +1361,7 @@ class _SparkLimitBottomSheet extends StatelessWidget {
             child: Text(
               isSparkPlus || (!isFree)
                   ? 'Your limit resets at midnight'
-                  : 'Your limit resets on Monday',
+                  : 'Buy Sparks or invite friends to earn more',
               style: GoogleFonts.dmSans(
                 fontSize: 13,
                 color: const Color(0xFF666666),
