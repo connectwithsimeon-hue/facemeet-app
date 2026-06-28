@@ -658,19 +658,32 @@ class _DailyVideoLayoutState extends State<_DailyVideoLayout> {
               ),
             ),
           ),
-        // Local PiP — top right corner, 120x160, rounded corners 12
+        // Local PiP — small top-right preview, matching the Spark call layout.
         if (hasLocal)
           Positioned(
-            top: 100,
-            right: 16,
-            width: 120,
-            height: 160,
+            top: 16,
+            right: 14,
+            width: 96,
+            height: 128,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox.expand(
-                child: VideoView(
-                  controller: _localController,
-                  fit: VideoViewFit.cover,
+              borderRadius: BorderRadius.circular(14),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white24, width: 1),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x66000000),
+                      blurRadius: 16,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: SizedBox.expand(
+                  child: VideoView(
+                    controller: _localController,
+                    fit: VideoViewFit.cover,
+                  ),
                 ),
               ),
             ),

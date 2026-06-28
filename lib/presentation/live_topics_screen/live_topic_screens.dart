@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../routes/app_routes.dart';
 import '../../services/daily_service.dart';
@@ -147,7 +148,9 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final bottomPadding =
-        mediaQuery.viewPadding.bottom + mediaQuery.viewInsets.bottom + 32;
+        mediaQuery.viewPadding.bottom + mediaQuery.viewInsets.bottom + 132;
+    final canCreate =
+        !_isSubmitting && !_isLoadingTopics && _selectedTopic != null;
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
@@ -202,37 +205,51 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
                 topic: _selectedTopic!,
                 cohostName: widget.cohostName,
               ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed:
-                  _isSubmitting || _isLoadingTopics || _selectedTopic == null
-                  ? null
-                  : _create,
-              icon: _isSubmitting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.group_add_rounded),
-              label: Text(_isSubmitting ? 'Creating...' : 'Invite Co-host'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(54),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                textStyle: GoogleFonts.dmSans(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundDark.withAlpha(242),
+            border: const Border(top: BorderSide(color: AppTheme.borderGlass)),
+          ),
+          child: ElevatedButton.icon(
+            onPressed: canCreate ? _create : null,
+            icon: _isSubmitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.group_add_rounded),
+            label: Text(
+              _isSubmitting
+                  ? 'Creating...'
+                  : _selectedTopic == null
+                  ? 'Select a topic'
+                  : 'Invite Co-host',
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: AppTheme.surfaceGlass,
+              disabledForegroundColor: AppTheme.textMuted,
+              minimumSize: const Size.fromHeight(54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              textStyle: GoogleFonts.dmSans(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -263,6 +280,10 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   String? _dailyRoomUrl;
   String? _dailyMeetingToken;
   String? _dailyAccessError;
+  bool _isAutoEnding = false;
+  bool _wakeLockEnabled = false;
+  bool _isMuted = false;
+  bool _isCameraOff = false;
 
   @override
   void initState() {
@@ -270,8 +291,10 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     WidgetsBinding.instance.addObserver(this);
     _liveTopic = widget.initialLiveTopic;
     _load();
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {});
+      unawaited(_maybeAutoEndExpiredRoom());
     });
     _statusRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       final status = _liveTopic?['status']?.toString();
@@ -286,6 +309,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _statusRefreshTimer?.cancel();
+    unawaited(_setLiveTopicWakeLock(false));
+    unawaited(_leaveDailyCall());
     super.dispose();
   }
 
@@ -364,6 +389,26 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     return '$minutes:$seconds';
   }
 
+  Future<void> _maybeAutoEndExpiredRoom() async {
+    if (_isAutoEnding || _isBusy) return;
+    final topic = _liveTopic;
+    final status = topic?['status']?.toString();
+    if (topic == null || status != 'live') return;
+
+    final endsAt = DateTime.tryParse(topic['ends_at']?.toString() ?? '');
+    if (endsAt == null || DateTime.now().isBefore(endsAt)) return;
+
+    if (!_isHostOrCohost) {
+      await _load(silent: true);
+      return;
+    }
+
+    final id = topic['id']?.toString();
+    if (id == null || id.isEmpty) return;
+    _isAutoEnding = true;
+    await _endRoom(id, autoEnded: true);
+  }
+
   Future<void> _runAction(
     Future<Map<String, dynamic>> Function() action,
   ) async {
@@ -383,7 +428,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     }
   }
 
-  Future<void> _endRoom(String liveTopicId) async {
+  Future<void> _endRoom(String liveTopicId, {bool autoEnded = false}) async {
     setState(() => _isBusy = true);
     try {
       final updated = await SupabaseService.instance.endLiveTopic(liveTopicId);
@@ -397,12 +442,14 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       debugPrint('LIVE TOPIC: end failed — $error');
       await _load(silent: true);
       if (_isAlreadyClosedError(error)) {
+        await _leaveDailyCall();
         _showSnack('This Live Topic has already ended.');
       } else {
         _showSnack(_friendlyLiveTopicError(error));
       }
     } finally {
       if (mounted) setState(() => _isBusy = false);
+      if (!autoEnded) _isAutoEnding = false;
     }
   }
 
@@ -422,8 +469,11 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     }
 
     if (kIsWeb || !_isHostOrCohost || status != 'live') {
+      await _setLiveTopicWakeLock(false);
       return;
     }
+
+    await _setLiveTopicWakeLock(true);
 
     if ((_dailyRoomUrl?.isNotEmpty ?? false) &&
         (_dailyMeetingToken?.isNotEmpty ?? false)) {
@@ -487,6 +537,52 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: leave failed safely — $error');
     }
+    await _setLiveTopicWakeLock(false);
+  }
+
+  Future<void> _setLiveTopicWakeLock(bool enabled) async {
+    if (_wakeLockEnabled == enabled) return;
+    try {
+      if (enabled) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+      _wakeLockEnabled = enabled;
+    } catch (error) {
+      debugPrint('LIVE TOPIC DAILY: wake lock update skipped — $error');
+    }
+  }
+
+  Future<void> _toggleLiveTopicMute() async {
+    final nextMuted = !_isMuted;
+    try {
+      final dailyState = _dailyCallKey.currentState;
+      if (dailyState == null) throw StateError('Daily call is not ready');
+      await dailyState.setMuted(nextMuted);
+      if (mounted) setState(() => _isMuted = nextMuted);
+    } catch (error) {
+      debugPrint('LIVE TOPIC DAILY: mute toggle failed — $error');
+      _showSnack('Could not update microphone. Please try again.');
+    }
+  }
+
+  Future<void> _toggleLiveTopicCamera() async {
+    final nextCameraOff = !_isCameraOff;
+    try {
+      final dailyState = _dailyCallKey.currentState;
+      if (dailyState == null) throw StateError('Daily call is not ready');
+      await dailyState.setCameraOff(nextCameraOff);
+      if (mounted) setState(() => _isCameraOff = nextCameraOff);
+    } catch (error) {
+      debugPrint('LIVE TOPIC DAILY: camera toggle failed — $error');
+      _showSnack('Could not update camera. Please try again.');
+    }
+  }
+
+  Future<void> _handleDailyCallEnded() async {
+    await _setLiveTopicWakeLock(false);
+    await _load(silent: true);
   }
 
   Future<void> _leaveRoom() async {
@@ -632,8 +728,13 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                       meetingToken: _dailyMeetingToken,
                       dailyCallKey: _dailyCallKey,
                       onRetry: () => _loadDailyAccess(force: true),
-                      onEnded: () => unawaited(_load(silent: true)),
+                      onEnded: () => unawaited(_handleDailyCallEnded()),
                       onRefreshDailyAccess: _refreshDailyAccess,
+                      isMuted: _isMuted,
+                      isCameraOff: _isCameraOff,
+                      onToggleMute: _toggleLiveTopicMute,
+                      onToggleCamera: _toggleLiveTopicCamera,
+                      onLeave: _leaveRoom,
                     ),
                     const SizedBox(height: 18),
                   ],
@@ -1385,6 +1486,11 @@ class _LiveTopicVideoStage extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onEnded;
   final Future<Map<String, String>?> Function() onRefreshDailyAccess;
+  final bool isMuted;
+  final bool isCameraOff;
+  final Future<void> Function() onToggleMute;
+  final Future<void> Function() onToggleCamera;
+  final Future<void> Function() onLeave;
 
   const _LiveTopicVideoStage({
     required this.isHostOrCohost,
@@ -1397,6 +1503,11 @@ class _LiveTopicVideoStage extends StatelessWidget {
     required this.onRetry,
     required this.onEnded,
     required this.onRefreshDailyAccess,
+    required this.isMuted,
+    required this.isCameraOff,
+    required this.onToggleMute,
+    required this.onToggleCamera,
+    required this.onLeave,
   });
 
   @override
@@ -1459,14 +1570,169 @@ class _LiveTopicVideoStage extends StatelessWidget {
           border: Border.all(color: AppTheme.borderGlass),
           borderRadius: BorderRadius.circular(24),
         ),
-        child: DailyCallView(
-          key: dailyCallKey,
-          roomUrl: safeRoomUrl,
-          meetingToken: safeMeetingToken,
-          onCallEnded: onEnded,
-          onCallError: (_) {},
-          onRefreshDailyAccess: onRefreshDailyAccess,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DailyCallView(
+              key: dailyCallKey,
+              roomUrl: safeRoomUrl,
+              meetingToken: safeMeetingToken,
+              onCallEnded: onEnded,
+              onCallError: (_) {},
+              onRefreshDailyAccess: onRefreshDailyAccess,
+            ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x99000000),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Color(0xCC000000),
+                  ],
+                  stops: [0, 0.2, 0.62, 1],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 18,
+              top: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(138),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.white.withAlpha(31)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Live Topic',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 18,
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _LiveTopicCallControlButton(
+                      icon: isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                      label: isMuted ? 'Unmute' : 'Mute',
+                      active: isMuted,
+                      onTap: onToggleMute,
+                    ),
+                    _LiveTopicCallControlButton(
+                      icon: Icons.call_end_rounded,
+                      label: 'Leave',
+                      destructive: true,
+                      emphasized: true,
+                      onTap: onLeave,
+                    ),
+                    _LiveTopicCallControlButton(
+                      icon: isCameraOff
+                          ? Icons.videocam_off_rounded
+                          : Icons.videocam_rounded,
+                      label: isCameraOff ? 'Camera On' : 'Camera Off',
+                      active: isCameraOff,
+                      onTap: onToggleCamera,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _LiveTopicCallControlButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Future<void> Function() onTap;
+  final bool active;
+  final bool destructive;
+  final bool emphasized;
+
+  const _LiveTopicCallControlButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+    this.destructive = false,
+    this.emphasized = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final background = destructive
+        ? AppTheme.error
+        : active
+        ? AppTheme.primary
+        : Colors.black.withAlpha(166);
+    final size = emphasized ? 62.0 : 54.0;
+
+    return InkWell(
+      onTap: () => unawaited(onTap()),
+      borderRadius: BorderRadius.circular(999),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: background,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withAlpha(35)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(77),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: emphasized ? 30 : 25),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }
