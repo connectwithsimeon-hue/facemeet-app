@@ -55,7 +55,6 @@ class ProfileScreenState extends State<ProfileScreen> {
   int _sparksEarned = 0;
   String _referralLink = '';
   bool _referralLoading = true;
-  bool _showNotificationSettings = false;
   bool _notificationActionInProgress = false;
   WebPushSetupResult? _notificationState;
   bool _publicProfileActionInProgress = false;
@@ -322,6 +321,26 @@ class ProfileScreenState extends State<ProfileScreen> {
       _profileFuture = _fetchProfile();
     });
     _loadStats();
+  }
+
+  Future<void> _openSettings(Map<String, dynamic> profile) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _SettingsScreen(
+          profile: profile,
+          notificationState: _notificationState,
+          notificationActionInProgress: _notificationActionInProgress,
+          onEnableWebNotifications: _enableWebNotifications,
+          onSendWebTestNotification: _sendWebTestNotification,
+          onOpenSupportEmail: _openSupportEmail,
+          onResetDiscovery: _handleResetDiscovery,
+          onDeleteAccount: _showDeleteAccountFlow,
+          onLogout: _handleLogout,
+          onSocialLinksSaved: _refreshProfile,
+        ),
+      ),
+    );
+    if (mounted) _refreshProfile();
   }
 
   void _handleLogout() {
@@ -1009,64 +1028,47 @@ class ProfileScreenState extends State<ProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Premium crown button
         Padding(
-          padding: const EdgeInsets.only(top: 16, bottom: 8),
-          child: GestureDetector(
-            onTap: () => Navigator.pushNamed(context, AppRoutes.pricingScreen),
-            child: Container(
-              width: double.infinity,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFE8503A), Color(0xFFD43F27)],
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.workspace_premium_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Buy Sparks/Subscriptions',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-
-        // Username row — @username with edit pencil
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(top: 16, bottom: 12),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                username.isNotEmpty ? '@$username' : 'Set username',
-                style: GoogleFonts.outfit(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textMuted,
+              Expanded(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        username.isNotEmpty ? '@$username' : 'Set username',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () => _showUsernameEditSheet(username),
+                      child: const Icon(
+                        Icons.edit_rounded,
+                        color: Color(0xFFE8503A),
+                        size: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: () => _showUsernameEditSheet(username),
-                child: const Icon(
-                  Icons.edit_rounded,
-                  color: Color(0xFFE8503A),
-                  size: 14,
+              const SizedBox(width: 12),
+              IconButton.filledTonal(
+                onPressed: () => _openSettings(profile),
+                icon: const Icon(Icons.settings_rounded),
+                tooltip: 'Settings',
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.surfaceGlass,
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: AppTheme.borderGlass),
                 ),
               ),
             ],
@@ -1182,492 +1184,8 @@ class ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        _buildCommunityGuidelinesCard(),
-        const SizedBox(height: 16),
-        _buildAppInfoCard(),
-        const SizedBox(height: 24),
-        _SectionCard(
-          title: 'Settings',
-          child: Column(
-            children: [
-              _SettingsRow(
-                icon: Icons.notifications_outlined,
-                label: 'Spark Session alerts',
-                trailing: Switch(
-                  value: true,
-                  onChanged: (_) {},
-                  activeThumbColor: AppTheme.primary,
-                  inactiveThumbColor: AppTheme.textMuted,
-                ),
-              ),
-              if (kIsWeb) ...[
-                Divider(color: AppTheme.borderGlass, height: 1),
-                _SettingsRow(
-                  icon: Icons.notifications_active_outlined,
-                  label: 'Notifications',
-                  onTap: () {
-                    debugPrint('WEB PUSH UI: settings opened');
-                    setState(
-                      () => _showNotificationSettings =
-                          !_showNotificationSettings,
-                    );
-                    if (_notificationState == null) _loadNotificationState();
-                  },
-                  trailing: Icon(
-                    _showNotificationSettings
-                        ? Icons.expand_less_rounded
-                        : Icons.chevron_right_rounded,
-                    color: AppTheme.textSecondary,
-                  ),
-                  subtitleBuilder: (_) => Text(
-                    _notificationState?.status ??
-                        'Enable alerts for Sparks, sessions, and messages.',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 12,
-                      color: AppTheme.textMuted,
-                    ),
-                  ),
-                ),
-                if (_showNotificationSettings) ...[
-                  const SizedBox(height: 8),
-                  _buildWebNotificationSettingsCard(),
-                  const SizedBox(height: 8),
-                ],
-              ],
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.visibility_outlined,
-                label: 'Show online status',
-                trailing: Switch(
-                  value: true,
-                  onChanged: (_) {},
-                  activeThumbColor: AppTheme.primary,
-                  inactiveThumbColor: AppTheme.textMuted,
-                ),
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.event_available_rounded,
-                label: 'FaceMeet Events',
-                trailing: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.textMuted,
-                  size: 20,
-                ),
-                subtitleBuilder: (_) => Text(
-                  'Request invite-only access to curated FaceMeet events.',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 12,
-                    color: AppTheme.textMuted,
-                  ),
-                ),
-                onTap: () =>
-                    Navigator.pushNamed(context, AppRoutes.eventsScreen),
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.help_outline_rounded,
-                label: 'Help & Support',
-                trailing: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.textMuted,
-                  size: 20,
-                ),
-                onTap: _openSupportEmail,
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.refresh_rounded,
-                label: 'Reset Discovery Feed',
-                trailing: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.textMuted,
-                  size: 20,
-                ),
-                onTap: _handleResetDiscovery,
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.delete_forever_outlined,
-                label: 'Delete Account',
-                foregroundColor: AppTheme.error,
-                trailing: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.error,
-                  size: 20,
-                ),
-                onTap: _showDeleteAccountFlow,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        GestureDetector(
-          onTap: _handleLogout,
-          child: Container(
-            height: 52,
-            decoration: BoxDecoration(
-              color: const Color(0x1AFF4458),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0x33FF4458), width: 1),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.logout_rounded,
-                  color: AppTheme.primary,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  'Sign out',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        _SettingsEntryCard(onTap: () => _openSettings(profile)),
       ],
-    );
-  }
-
-  Widget _buildCommunityGuidelinesCard() {
-    const prohibitedItems = [
-      'nudity or sexual exploitation',
-      'harassment or hate',
-      'threats or abuse',
-      'child sexual abuse material or exploitation',
-      'fake or misleading profiles',
-      'illegal content',
-      'spam or scams',
-    ];
-
-    return _SectionCard(
-      title: 'Community Guidelines & Safety',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'FaceMeet has zero tolerance for objectionable content, harassment, abuse, exploitation, fake profiles, or unsafe behavior.',
-            style: GoogleFonts.dmSans(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
-              height: 1.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Users cannot post, upload, or send:',
-            style: GoogleFonts.dmSans(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...prohibitedItems.map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.block_rounded,
-                    color: AppTheme.primary,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      item,
-                      style: GoogleFonts.dmSans(
-                        fontSize: 12,
-                        color: AppTheme.textMuted,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Use Report User or Block User from profile and chat screens when something feels unsafe.',
-            style: GoogleFonts.dmSans(
-              fontSize: 12,
-              color: AppTheme.textMuted,
-              height: 1.45,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAppInfoCard() {
-    return _SectionCard(
-      title: 'App Info',
-      child: FutureBuilder<PackageInfo>(
-        future: PackageInfo.fromPlatform(),
-        builder: (context, snapshot) {
-          final packageInfo = snapshot.data;
-          final platform = kIsWeb
-              ? 'Web'
-              : defaultTargetPlatform == TargetPlatform.android
-              ? 'Android'
-              : defaultTargetPlatform == TargetPlatform.iOS
-              ? 'iOS'
-              : defaultTargetPlatform.name;
-
-          return Column(
-            children: [
-              _SettingsRow(
-                icon: Icons.info_outline_rounded,
-                label: 'App version',
-                trailing: Text(
-                  packageInfo?.version ?? 'loading',
-                  style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.tag_rounded,
-                label: 'Build',
-                trailing: Text(
-                  packageInfo == null
-                      ? 'loading'
-                      : '+${packageInfo.buildNumber}',
-                  style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Divider(color: AppTheme.borderGlass, height: 1),
-              _SettingsRow(
-                icon: Icons.devices_rounded,
-                label: 'Platform',
-                trailing: Text(
-                  platform,
-                  style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildWebNotificationSettingsCard() {
-    final state =
-        _notificationState ??
-        const WebPushSetupResult(
-          success: false,
-          status: 'Enable Notifications',
-          message:
-              'Get notified when someone Sparks you, when a Spark Session is ready, and when chat unlocks.',
-        );
-    final isEnabled = state.success && state.status == 'Notifications enabled';
-    final isBlocked = state.status.toLowerCase().contains('blocked');
-    final canEnable =
-        !_notificationActionInProgress && !isEnabled && !isBlocked;
-    final canTest = !_notificationActionInProgress && isEnabled;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundVariant.withAlpha(235),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.borderGlass, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withAlpha(34),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.notifications_active_rounded,
-                  color: AppTheme.primary,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Enable FaceMeet Notifications',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Get notified when someone Sparks you, when a Mutual Spark is ready, and when chat unlocks.',
-            style: GoogleFonts.dmSans(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'On iPhone, notifications work after FaceMeet is added to your Home Screen and opened from the app icon.',
-            style: GoogleFonts.dmSans(
-              fontSize: 12,
-              color: AppTheme.textMuted,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'On Android, allow notifications so you do not miss Sparks, Spark Sessions, or new chats.',
-            style: GoogleFonts.dmSans(
-              fontSize: 12,
-              color: AppTheme.textMuted,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isEnabled
-                  ? AppTheme.sparkGreen.withAlpha(24)
-                  : AppTheme.surfaceGlass,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isEnabled
-                    ? AppTheme.sparkGreen.withAlpha(90)
-                    : AppTheme.borderGlass,
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_notificationActionInProgress)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppTheme.primary,
-                    ),
-                  )
-                else
-                  Icon(
-                    isEnabled
-                        ? Icons.check_circle_rounded
-                        : isBlocked
-                        ? Icons.block_rounded
-                        : Icons.info_outline_rounded,
-                    color: isEnabled
-                        ? AppTheme.sparkGreen
-                        : isBlocked
-                        ? AppTheme.error
-                        : AppTheme.primary,
-                    size: 18,
-                  ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        state.status,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        state.message,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 12,
-                          color: AppTheme.textMuted,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: canEnable ? _enableWebNotifications : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    disabledBackgroundColor: AppTheme.surfaceGlass,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                  child: Text(
-                    isEnabled
-                        ? 'Notifications enabled'
-                        : 'Enable Notifications',
-                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: canTest ? _sendWebTestNotification : null,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    disabledForegroundColor: AppTheme.textMuted,
-                    minimumSize: const Size.fromHeight(48),
-                    side: BorderSide(color: AppTheme.borderGlass),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                  child: Text(
-                    'Send Test',
-                    style: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 
@@ -2061,6 +1579,509 @@ class ProfileScreenState extends State<ProfileScreen> {
               Container(width: 1, height: 40, color: AppTheme.borderGlass),
               Expanded(child: _ShimmerStatItem()),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsEntryCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _SettingsEntryCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Settings',
+      child: _SettingsRow(
+        icon: Icons.settings_rounded,
+        label: 'Account, notifications, social links',
+        subtitleBuilder: (_) => Text(
+          'Manage privacy, Sparks, support, and account controls.',
+          style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
+        ),
+        trailing: const Icon(
+          Icons.chevron_right_rounded,
+          color: AppTheme.textMuted,
+          size: 20,
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _SettingsScreen extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  final WebPushSetupResult? notificationState;
+  final bool notificationActionInProgress;
+  final Future<void> Function() onEnableWebNotifications;
+  final Future<void> Function() onSendWebTestNotification;
+  final Future<void> Function() onOpenSupportEmail;
+  final Future<void> Function() onResetDiscovery;
+  final Future<void> Function() onDeleteAccount;
+  final VoidCallback onLogout;
+  final VoidCallback onSocialLinksSaved;
+
+  const _SettingsScreen({
+    required this.profile,
+    required this.notificationState,
+    required this.notificationActionInProgress,
+    required this.onEnableWebNotifications,
+    required this.onSendWebTestNotification,
+    required this.onOpenSupportEmail,
+    required this.onResetDiscovery,
+    required this.onDeleteAccount,
+    required this.onLogout,
+    required this.onSocialLinksSaved,
+  });
+
+  @override
+  State<_SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<_SettingsScreen> {
+  late final TextEditingController _xController;
+  late final TextEditingController _instagramController;
+  late final TextEditingController _tiktokController;
+  late final TextEditingController _facebookController;
+  late final TextEditingController _linkedinController;
+  late final TextEditingController _websiteController;
+  bool _isSavingSocialLinks = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final links = _parseSocialLinks(widget.profile['social_links']);
+    _xController = TextEditingController(text: links['x'] ?? '');
+    _instagramController = TextEditingController(
+      text: links['instagram'] ?? '',
+    );
+    _tiktokController = TextEditingController(text: links['tiktok'] ?? '');
+    _facebookController = TextEditingController(text: links['facebook'] ?? '');
+    _linkedinController = TextEditingController(text: links['linkedin'] ?? '');
+    _websiteController = TextEditingController(text: links['website'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    _xController.dispose();
+    _instagramController.dispose();
+    _tiktokController.dispose();
+    _facebookController.dispose();
+    _linkedinController.dispose();
+    _websiteController.dispose();
+    super.dispose();
+  }
+
+  Map<String, String> _parseSocialLinks(dynamic raw) {
+    if (raw is Map) {
+      return raw.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
+    }
+    return const {};
+  }
+
+  String _cleanSocialValue(String value, {bool website = false}) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    if (website &&
+        !trimmed.startsWith('https://') &&
+        !trimmed.startsWith('http://')) {
+      return 'https://$trimmed';
+    }
+    return trimmed;
+  }
+
+  Future<void> _saveSocialLinks() async {
+    setState(() => _isSavingSocialLinks = true);
+    final links = <String, String>{
+      'x': _cleanSocialValue(_xController.text),
+      'instagram': _cleanSocialValue(_instagramController.text),
+      'tiktok': _cleanSocialValue(_tiktokController.text),
+      'facebook': _cleanSocialValue(_facebookController.text),
+      'linkedin': _cleanSocialValue(_linkedinController.text),
+      'website': _cleanSocialValue(_websiteController.text, website: true),
+    }..removeWhere((_, value) => value.trim().isEmpty);
+
+    try {
+      await SupabaseService.instance.updateUserProfile({'social_links': links});
+      widget.profile['social_links'] = links;
+      widget.onSocialLinksSaved();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Social Links saved', style: GoogleFonts.dmSans()),
+          backgroundColor: AppTheme.sparkGreen,
+        ),
+      );
+    } catch (error) {
+      debugPrint('SOCIAL LINKS: save failed — $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Social Links are not ready to save yet.',
+            style: GoogleFonts.dmSans(),
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingSocialLinks = false);
+    }
+  }
+
+  String get _email => widget.profile['email']?.toString().trim() ?? '';
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundDark,
+      appBar: AppBar(
+        backgroundColor: AppTheme.backgroundDark,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          'Settings',
+          style: GoogleFonts.dmSans(fontWeight: FontWeight.w800),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 120 + keyboardInset),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionCard(
+                title: 'Account',
+                child: _SettingsRow(
+                  icon: Icons.account_circle_outlined,
+                  label: _email.isEmpty ? 'FaceMeet account' : _email,
+                  subtitleBuilder: (_) => Text(
+                    'Your signed-in FaceMeet account.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Notifications',
+                child: Column(
+                  children: [
+                    _SettingsRow(
+                      icon: Icons.notifications_outlined,
+                      label: 'Spark Session alerts',
+                      subtitleBuilder: (_) => Text(
+                        'Alerts for Sparks, sessions, chats, and Live Topics.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                    if (kIsWeb) ...[
+                      Divider(color: AppTheme.borderGlass, height: 1),
+                      _SettingsRow(
+                        icon: Icons.notifications_active_outlined,
+                        label: 'Web notifications',
+                        subtitleBuilder: (_) => Text(
+                          widget.notificationState?.status ??
+                              'Enable alerts in this browser.',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                        trailing: widget.notificationActionInProgress
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: AppTheme.primary,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppTheme.textMuted,
+                              ),
+                        onTap: widget.notificationActionInProgress
+                            ? null
+                            : widget.onEnableWebNotifications,
+                      ),
+                      Divider(color: AppTheme.borderGlass, height: 1),
+                      _SettingsRow(
+                        icon: Icons.send_rounded,
+                        label: 'Send test notification',
+                        onTap: widget.notificationActionInProgress
+                            ? null
+                            : widget.onSendWebTestNotification,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Privacy & Safety',
+                child: Column(
+                  children: [
+                    _SettingsRow(
+                      icon: Icons.visibility_outlined,
+                      label: 'Online status',
+                      subtitleBuilder: (_) => Text(
+                        'Your activity state helps conversations feel current.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                    Divider(color: AppTheme.borderGlass, height: 1),
+                    _SettingsRow(
+                      icon: Icons.health_and_safety_outlined,
+                      label: 'Community Guidelines',
+                      subtitleBuilder: (_) => Text(
+                        'No harassment, exploitation, fake profiles, or unsafe behavior.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                    Divider(color: AppTheme.borderGlass, height: 1),
+                    _SettingsRow(
+                      icon: Icons.refresh_rounded,
+                      label: 'Reset Discovery Feed',
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppTheme.textMuted,
+                        size: 20,
+                      ),
+                      onTap: widget.onResetDiscovery,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Social Links',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Add your public social links so people can find you outside FaceMeet.',
+                      style: GoogleFonts.dmSans(
+                        color: AppTheme.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _SocialLinkField(
+                      controller: _xController,
+                      label: 'X / Twitter',
+                      hint: '@username or https://x.com/username',
+                    ),
+                    _SocialLinkField(
+                      controller: _instagramController,
+                      label: 'Instagram',
+                      hint: '@username or Instagram URL',
+                    ),
+                    _SocialLinkField(
+                      controller: _tiktokController,
+                      label: 'TikTok',
+                      hint: '@username or TikTok URL',
+                    ),
+                    _SocialLinkField(
+                      controller: _facebookController,
+                      label: 'Facebook',
+                      hint: 'Facebook profile/page URL',
+                    ),
+                    _SocialLinkField(
+                      controller: _linkedinController,
+                      label: 'LinkedIn',
+                      hint: 'LinkedIn profile URL',
+                    ),
+                    _SocialLinkField(
+                      controller: _websiteController,
+                      label: 'Website',
+                      hint: 'https://your-site.com',
+                      keyboardType: TextInputType.url,
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: _isSavingSocialLinks ? null : _saveSocialLinks,
+                      icon: _isSavingSocialLinks
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(Icons.save_rounded),
+                      label: Text(
+                        _isSavingSocialLinks
+                            ? 'Saving...'
+                            : 'Save Social Links',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(50),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        textStyle: GoogleFonts.dmSans(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Subscription / Sparks',
+                child: _SettingsRow(
+                  icon: Icons.workspace_premium_rounded,
+                  label: 'Buy Sparks / Subscriptions',
+                  subtitleBuilder: (_) => Text(
+                    'Manage FaceMeet Sparks and membership options.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppTheme.textMuted,
+                    size: 20,
+                  ),
+                  onTap: () =>
+                      Navigator.pushNamed(context, AppRoutes.pricingScreen),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Support',
+                child: Column(
+                  children: [
+                    _SettingsRow(
+                      icon: Icons.event_available_rounded,
+                      label: 'FaceMeet Events',
+                      subtitleBuilder: (_) => Text(
+                        'Request invite-only access to curated FaceMeet events.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppTheme.textMuted,
+                        size: 20,
+                      ),
+                      onTap: () =>
+                          Navigator.pushNamed(context, AppRoutes.eventsScreen),
+                    ),
+                    Divider(color: AppTheme.borderGlass, height: 1),
+                    _SettingsRow(
+                      icon: Icons.help_outline_rounded,
+                      label: 'Help & Support',
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppTheme.textMuted,
+                        size: 20,
+                      ),
+                      onTap: widget.onOpenSupportEmail,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Session',
+                child: _SettingsRow(
+                  icon: Icons.logout_rounded,
+                  label: 'Sign out',
+                  foregroundColor: AppTheme.primary,
+                  onTap: widget.onLogout,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SectionCard(
+                title: 'Danger Zone',
+                child: _SettingsRow(
+                  icon: Icons.delete_forever_outlined,
+                  label: 'Delete Account',
+                  foregroundColor: AppTheme.error,
+                  trailing: const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppTheme.error,
+                    size: 20,
+                  ),
+                  onTap: widget.onDeleteAccount,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SocialLinkField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final TextInputType? keyboardType;
+
+  const _SocialLinkField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+    this.keyboardType,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        textInputAction: TextInputAction.next,
+        style: GoogleFonts.dmSans(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          labelStyle: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+          hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+          filled: true,
+          fillColor: Colors.white.withAlpha(15),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.borderGlass),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.borderGlass),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 1.4),
           ),
         ),
       ),
@@ -2861,7 +2882,7 @@ class _ConnectionIntentOption {
 class _SettingsRow extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Widget trailing;
+  final Widget? trailing;
   final VoidCallback? onTap;
   final Color? foregroundColor;
   final WidgetBuilder? subtitleBuilder;
@@ -2869,7 +2890,7 @@ class _SettingsRow extends StatelessWidget {
   const _SettingsRow({
     required this.icon,
     required this.label,
-    required this.trailing,
+    this.trailing,
     this.onTap,
     this.foregroundColor,
     this.subtitleBuilder,
@@ -2907,7 +2928,7 @@ class _SettingsRow extends StatelessWidget {
                 ],
               ),
             ),
-            trailing,
+            if (trailing != null) trailing!,
           ],
         ),
       ),
