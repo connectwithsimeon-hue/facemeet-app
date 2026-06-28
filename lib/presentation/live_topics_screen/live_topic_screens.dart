@@ -90,8 +90,13 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final bottomPadding =
+        mediaQuery.viewPadding.bottom + mediaQuery.viewInsets.bottom + 32;
+
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: AppTheme.backgroundDark,
         foregroundColor: Colors.white,
@@ -102,8 +107,10 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
         ),
       ),
       body: SafeArea(
+        top: false,
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
           children: [
             _IntroCard(cohostName: widget.cohostName),
             const SizedBox(height: 20),

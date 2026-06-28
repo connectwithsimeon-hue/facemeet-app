@@ -606,227 +606,12 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
                     bottom: false,
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(width: 8),
-                          // Avatar
-                          Stack(
-                            children: [
-                              Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: AppTheme.primary,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(19),
-                                  child: ProfileAvatar(
-                                    thumbnailUrl:
-                                        _user['thumbnailUrl'] as String?,
-                                    firstName: _otherName,
-                                    radius: 19,
-                                  ),
-                                ),
-                              ),
-                              if (isOnline)
-                                Positioned(
-                                  right: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                    width: 11,
-                                    height: 11,
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.sparkGreen,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: AppTheme.backgroundDark,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _otherName,
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                Text(
-                                  isOnline
-                                      ? 'Online now'
-                                      : PresenceService.formatLastSeen(
-                                          lastSeenAt,
-                                        ),
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 12,
-                                    color: isOnline
-                                        ? const Color(0xFF4CAF50)
-                                        : AppTheme.textMuted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Video camera button — starts new Spark Session
-                          _isStartingSession
-                              ? const SizedBox(
-                                  width: 40,
-                                  height: 40,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        color: AppTheme.primary,
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    // Spark balance glass pill
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: BackdropFilter(
-                                        filter: ImageFilter.blur(
-                                          sigmaX: 8,
-                                          sigmaY: 8,
-                                        ),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.surfaceGlass,
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                            border: Border.all(
-                                              color: AppTheme.borderGlass,
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                'Available ',
-                                                style: GoogleFonts.dmSans(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: AppTheme.textMuted,
-                                                ),
-                                              ),
-                                              const Icon(
-                                                Icons.bolt_rounded,
-                                                color: AppTheme.primary,
-                                                size: 14,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                '$sparkBalance',
-                                                style: GoogleFonts.dmSans(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    GestureDetector(
-                                      onTap: _startLiveTopic,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 7,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.surfaceGlass,
-                                          borderRadius: BorderRadius.circular(
-                                            20.0,
-                                          ),
-                                          border: Border.all(
-                                            color: AppTheme.borderGlass,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.forum_rounded,
-                                              color: AppTheme.primary,
-                                              size: 17,
-                                            ),
-                                            const SizedBox(width: 5),
-                                            Text(
-                                              'Live',
-                                              style: GoogleFonts.dmSans(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    // Spark button
-                                    GestureDetector(
-                                      onTap: _startNewSparkSession,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 7,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.primary,
-                                          borderRadius: BorderRadius.circular(
-                                            20.0,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.videocam_rounded,
-                                              color: Colors.white,
-                                              size: 18,
-                                            ),
-                                            const SizedBox(width: 5),
-                                            Text(
-                                              'Spark',
-                                              style: GoogleFonts.dmSans(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                          _buildHeaderIdentityRow(isOnline, lastSeenAt),
+                          const SizedBox(height: 10),
+                          _buildHeaderActionRow(sparkBalance),
                         ],
                       ),
                     ),
@@ -998,6 +783,214 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
             onDecline: _declineSparkRequest,
           ),
       ],
+    );
+  }
+
+  Widget _buildHeaderIdentityRow(bool isOnline, String? lastSeenAt) {
+    return Row(
+      children: [
+        const SizedBox(width: 8),
+        Stack(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.primary, width: 1.5),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(19),
+                child: ProfileAvatar(
+                  thumbnailUrl: _user['thumbnailUrl'] as String?,
+                  firstName: _otherName,
+                  radius: 19,
+                ),
+              ),
+            ),
+            if (isOnline)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 11,
+                  height: 11,
+                  decoration: BoxDecoration(
+                    color: AppTheme.sparkGreen,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: AppTheme.backgroundDark,
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _otherName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: GoogleFonts.dmSans(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              Text(
+                isOnline
+                    ? 'Online now'
+                    : PresenceService.formatLastSeen(lastSeenAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: GoogleFonts.dmSans(
+                  fontSize: 12,
+                  color: isOnline
+                      ? const Color(0xFF4CAF50)
+                      : AppTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeaderActionRow(int sparkBalance) {
+    if (_isStartingSession) {
+      return const Padding(
+        padding: EdgeInsets.only(left: 8),
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                color: AppTheme.primary,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 8, right: 4),
+        child: Row(
+          children: [
+            _buildSparkBalancePill(sparkBalance),
+            const SizedBox(width: 8),
+            _buildHeaderPillButton(
+              label: 'Live',
+              icon: Icons.forum_rounded,
+              onTap: _startLiveTopic,
+              isPrimary: false,
+            ),
+            const SizedBox(width: 8),
+            _buildHeaderPillButton(
+              label: 'Spark',
+              icon: Icons.videocam_rounded,
+              onTap: _startNewSparkSession,
+              isPrimary: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSparkBalancePill(int sparkBalance) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceGlass,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.borderGlass),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Available',
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+              const SizedBox(width: 5),
+              const Icon(Icons.bolt_rounded, color: AppTheme.primary, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                '$sparkBalance',
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderPillButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+    required bool isPrimary,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isPrimary ? AppTheme.primary : AppTheme.surfaceGlass,
+          borderRadius: BorderRadius.circular(20),
+          border: isPrimary ? null : Border.all(color: AppTheme.borderGlass),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isPrimary ? Colors.white : AppTheme.primary,
+              size: 17,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
