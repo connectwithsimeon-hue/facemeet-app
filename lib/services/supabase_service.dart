@@ -769,6 +769,11 @@ class SupabaseService {
   // LIVE TOPICS
   // ============================================================
 
+  Future<List<Map<String, dynamic>>> listActiveCuratedLiveTopics() async {
+    final response = await client.rpc('list_active_curated_live_topics');
+    return List<Map<String, dynamic>>.from(response as List? ?? const []);
+  }
+
   Future<Map<String, dynamic>> createLiveTopicFromConnection({
     required String cohostUserId,
     required String title,
@@ -783,6 +788,22 @@ class SupabaseService {
         'p_title': title,
         'p_topic': topic,
         'p_description': description,
+        'p_visibility': visibility,
+      },
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> createLiveTopicFromCuratedTopic({
+    required String cohostUserId,
+    required String curatedTopicId,
+    String visibility = 'link_only',
+  }) async {
+    final response = await client.rpc(
+      'create_live_topic_from_curated_topic',
+      params: {
+        'p_cohost_user_id': cohostUserId,
+        'p_curated_topic_id': curatedTopicId,
         'p_visibility': visibility,
       },
     );

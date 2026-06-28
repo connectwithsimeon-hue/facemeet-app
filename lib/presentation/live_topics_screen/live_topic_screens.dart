@@ -23,38 +23,50 @@ class CreateLiveTopicScreen extends StatefulWidget {
 }
 
 class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
-  final _titleCtrl = TextEditingController();
-  final _topicCtrl = TextEditingController();
-  final _descriptionCtrl = TextEditingController();
-  String _visibility = 'link_only';
+  static const String _visibility = 'link_only';
+
+  List<Map<String, dynamic>> _curatedTopics = const [];
+  Map<String, dynamic>? _selectedTopic;
+  bool _isLoadingTopics = true;
   bool _isSubmitting = false;
 
   @override
-  void dispose() {
-    _titleCtrl.dispose();
-    _topicCtrl.dispose();
-    _descriptionCtrl.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadCuratedTopics();
+  }
+
+  Future<void> _loadCuratedTopics() async {
+    try {
+      final topics = await SupabaseService.instance
+          .listActiveCuratedLiveTopics();
+      if (!mounted) return;
+      setState(() {
+        _curatedTopics = topics;
+        _selectedTopic = topics.isEmpty ? null : topics.first;
+        _isLoadingTopics = false;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isLoadingTopics = false);
+        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      }
+    }
   }
 
   Future<void> _create() async {
-    final title = _titleCtrl.text.trim();
-    final topic = _topicCtrl.text.trim();
-    if (title.length < 3 || topic.length < 3) {
-      _showSnack('Add a title and topic to continue.');
+    final selectedTopicId = _selectedTopic?['id']?.toString();
+    if (selectedTopicId == null || selectedTopicId.isEmpty) {
+      _showSnack('Choose a curated topic to continue.');
       return;
     }
 
     setState(() => _isSubmitting = true);
     try {
       final liveTopic = await SupabaseService.instance
-          .createLiveTopicFromConnection(
+          .createLiveTopicFromCuratedTopic(
             cohostUserId: widget.cohostUserId,
-            title: title,
-            topic: topic,
-            description: _descriptionCtrl.text.trim().isEmpty
-                ? null
-                : _descriptionCtrl.text.trim(),
+            curatedTopicId: selectedTopicId,
             visibility: _visibility,
           );
       if (!mounted) return;
@@ -77,6 +89,9 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
     }
     if (message.contains('connection_required')) {
       return 'Live Topics can start from an unlocked connection.';
+    }
+    if (message.contains('curated_topic_not_available')) {
+      return 'That curated topic is no longer available. Choose another one.';
     }
     return message;
   }
@@ -114,84 +129,45 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
           children: [
             _IntroCard(cohostName: widget.cohostName),
             const SizedBox(height: 20),
-            _Field(
-              controller: _titleCtrl,
-              label: 'Title',
-              hint: 'What is this Live Topic called?',
-            ),
-            const SizedBox(height: 14),
-            _Field(
-              controller: _topicCtrl,
-              label: 'Topic',
-              hint: 'What will you talk about?',
-            ),
-            const SizedBox(height: 14),
-            _Field(
-              controller: _descriptionCtrl,
-              label: 'Description',
-              hint: 'Optional context for viewers',
-              maxLines: 4,
-            ),
-            const SizedBox(height: 18),
             Text(
-              'Visibility',
+              'Trending Today',
               style: GoogleFonts.dmSans(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
+                fontSize: 18,
               ),
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _VisibilityChip(
-                  label: 'Link-only',
-                  value: 'link_only',
-                  selected: _visibility == 'link_only',
-                  onSelected: () => setState(() => _visibility = 'link_only'),
+            const SizedBox(height: 12),
+            if (_isLoadingTopics)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 36),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 ),
-                _VisibilityChip(
-                  label: 'Public',
-                  value: 'public',
-                  selected: _visibility == 'public',
-                  onSelected: () => setState(() => _visibility = 'public'),
+              )
+            else if (_curatedTopics.isEmpty)
+              const _NoCuratedTopicsCard()
+            else
+              for (final topic in _curatedTopics) ...[
+                _CuratedTopicCard(
+                  topic: topic,
+                  selected: _selectedTopic?['id'] == topic['id'],
+                  onSelected: () => setState(() => _selectedTopic = topic),
                 ),
-                _VisibilityChip(
-                  label: 'Invite-only',
-                  value: 'invite_only',
-                  selected: _visibility == 'invite_only',
-                  onSelected: () => setState(() => _visibility = 'invite_only'),
-                ),
+                const SizedBox(height: 12),
               ],
-            ),
             const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceGlass,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.borderGlass),
+            if (_selectedTopic != null)
+              _SelectedTopicSummary(
+                topic: _selectedTopic!,
+                cohostName: widget.cohostName,
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.bolt_rounded, color: AppTheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Costs 1 Spark. Opens a 15-minute Live Topic room.',
-                      style: GoogleFonts.dmSans(
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: _isSubmitting ? null : _create,
+              onPressed:
+                  _isSubmitting || _isLoadingTopics || _selectedTopic == null
+                  ? null
+                  : _create,
               icon: _isSubmitting
                   ? const SizedBox(
                       width: 18,
@@ -332,10 +308,13 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
 
   Future<void> _share() async {
     final title = _liveTopic?['title']?.toString() ?? 'this Live Topic';
+    final shareHook = _liveTopic?['curated_share_hook']?.toString().trim();
     final isLive = _liveTopic?['status'] == 'live';
-    final copy = isLive
-        ? "I'm live on FaceMeet discussing $title.\nWatch, ask a question, or request to join:\n$_shareUrl"
-        : "I'm starting a FaceMeet Live Topic about $title.\nJoin when we go live:\n$_shareUrl";
+    final copy = shareHook != null && shareHook.isNotEmpty
+        ? '$shareHook\n$_shareUrl'
+        : isLive
+        ? 'I\'m live on FaceMeet discussing "$title".\nWatch, ask a question, or request to join:\n$_shareUrl'
+        : 'I\'m starting a FaceMeet Live Topic about "$title".\nJoin when we go live:\n$_shareUrl';
     await Share.share(copy, subject: 'FaceMeet Live Topic');
   }
 
@@ -403,7 +382,14 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                   const SizedBox(height: 18),
                   _InfoCard(
                     title: topic['title']?.toString() ?? 'Live Topic',
-                    body: topic['topic']?.toString() ?? '',
+                    body:
+                        topic['curated_prompt']?.toString() ??
+                        topic['description']?.toString() ??
+                        topic['topic']?.toString() ??
+                        '',
+                    category:
+                        topic['curated_category']?.toString() ??
+                        topic['topic']?.toString(),
                     description: topic['description']?.toString(),
                     status: topic['status']?.toString() ?? 'pending',
                   ),
@@ -548,7 +534,7 @@ class _IntroCard extends StatelessWidget {
           const Icon(Icons.forum_rounded, color: AppTheme.primary, size: 30),
           const SizedBox(height: 12),
           Text(
-            'Create a focused conversation with $cohostName.',
+            'Choose a curated topic to discuss with $cohostName.',
             style: GoogleFonts.dmSans(
               color: Colors.white,
               fontSize: 22,
@@ -557,7 +543,7 @@ class _IntroCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Live Topics are 15-minute link-shareable conversations between connected people. Your co-host must accept before it can go live.',
+            'Live Topics are 15-minute link-shareable conversations between connected people. Choose a FaceMeet topic, invite your co-host, then go live after they accept.',
             style: GoogleFonts.dmSans(
               color: AppTheme.textSecondary,
               height: 1.35,
@@ -569,71 +555,271 @@ class _IntroCard extends StatelessWidget {
   }
 }
 
-class _Field extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final String hint;
-  final int maxLines;
-
-  const _Field({
-    required this.controller,
-    required this.label,
-    required this.hint,
-    this.maxLines = 1,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      maxLines: maxLines,
-      style: GoogleFonts.dmSans(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        labelStyle: GoogleFonts.dmSans(color: AppTheme.textSecondary),
-        hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
-        filled: true,
-        fillColor: AppTheme.surfaceGlass,
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppTheme.borderGlass),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
-        ),
-      ),
-    );
-  }
-}
-
-class _VisibilityChip extends StatelessWidget {
-  final String label;
-  final String value;
+class _CuratedTopicCard extends StatelessWidget {
+  final Map<String, dynamic> topic;
   final bool selected;
   final VoidCallback onSelected;
 
-  const _VisibilityChip({
-    required this.label,
-    required this.value,
+  const _CuratedTopicCard({
+    required this.topic,
     required this.selected,
     required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
-      backgroundColor: AppTheme.surfaceGlass,
-      selectedColor: AppTheme.primary,
-      labelStyle: GoogleFonts.dmSans(
-        color: selected ? Colors.white : AppTheme.textSecondary,
-        fontWeight: FontWeight.w700,
+    final category = topic['category']?.toString() ?? 'Live Topic';
+    final title = topic['title']?.toString() ?? '';
+    final prompt = topic['prompt']?.toString() ?? '';
+    final featured = topic['featured'] == true;
+    return InkWell(
+      onTap: onSelected,
+      borderRadius: BorderRadius.circular(22),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primary.withValues(alpha: 0.16)
+              : AppTheme.surfaceGlass,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: selected ? AppTheme.primary : AppTheme.borderGlass,
+            width: selected ? 1.4 : 1,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: AppTheme.primary.withValues(alpha: 0.16),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _MiniPill(label: category, icon: Icons.auto_awesome_rounded),
+                if (featured)
+                  const _MiniPill(
+                    label: 'Featured',
+                    icon: Icons.local_fire_department_rounded,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: GoogleFonts.dmSans(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                height: 1.12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              prompt,
+              style: GoogleFonts.dmSans(
+                color: AppTheme.textSecondary,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected ? AppTheme.primary : AppTheme.textMuted,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  selected ? 'Selected topic' : 'Start with this topic',
+                  style: GoogleFonts.dmSans(
+                    color: selected ? AppTheme.primary : AppTheme.textSecondary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-      side: const BorderSide(color: AppTheme.borderGlass),
+    );
+  }
+}
+
+class _SelectedTopicSummary extends StatelessWidget {
+  final Map<String, dynamic> topic;
+  final String cohostName;
+
+  const _SelectedTopicSummary({required this.topic, required this.cohostName});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = topic['title']?.toString() ?? 'Selected topic';
+    final prompt = topic['prompt']?.toString() ?? '';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Selected Topic',
+            style: GoogleFonts.dmSans(
+              color: AppTheme.primary,
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if (prompt.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              prompt,
+              style: GoogleFonts.dmSans(
+                color: AppTheme.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          _SummaryLine(
+            icon: Icons.person_rounded,
+            label: 'Co-host: $cohostName',
+          ),
+          const SizedBox(height: 8),
+          const _SummaryLine(icon: Icons.bolt_rounded, label: 'Costs 1 Spark'),
+          const SizedBox(height: 8),
+          const _SummaryLine(
+            icon: Icons.timer_rounded,
+            label: 'Opens a 15-minute Live Topic room',
+          ),
+          const SizedBox(height: 8),
+          const _SummaryLine(
+            icon: Icons.link_rounded,
+            label: 'Visibility: Link-only',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoCuratedTopicsCard extends StatelessWidget {
+  const _NoCuratedTopicsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.forum_outlined, color: AppTheme.textMuted, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            'No Live Topics available right now.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Check back later for new curated topics.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryLine extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _SummaryLine({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppTheme.primary, size: 18),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: GoogleFonts.dmSans(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MiniPill extends StatelessWidget {
+  final String label;
+  final IconData icon;
+
+  const _MiniPill({required this.label, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: AppTheme.primary, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              color: AppTheme.primary,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -691,12 +877,14 @@ class _LiveRoomCard extends StatelessWidget {
 class _InfoCard extends StatelessWidget {
   final String title;
   final String body;
+  final String? category;
   final String? description;
   final String status;
 
   const _InfoCard({
     required this.title,
     required this.body,
+    required this.category,
     required this.description,
     required this.status,
   });
@@ -713,7 +901,18 @@ class _InfoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _StatusPill(status: status),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _StatusPill(status: status),
+              if (category != null && category!.trim().isNotEmpty)
+                _MiniPill(
+                  label: category!.trim(),
+                  icon: Icons.auto_awesome_rounded,
+                ),
+            ],
+          ),
           const SizedBox(height: 12),
           Text(
             title,
