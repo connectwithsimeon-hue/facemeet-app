@@ -418,7 +418,8 @@ class WebPushNotificationService {
         type != 'spark_schedule_reminder' &&
         type != 'spark_schedule_ready' &&
         type != 'chat_unlocked' &&
-        type != 'new_message') {
+        type != 'new_message' &&
+        type != 'live_topic_invite') {
       debugPrint('WEB PUSH: event wiring disabled in Phase 2E type=$type');
       return false;
     }

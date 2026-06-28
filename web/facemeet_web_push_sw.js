@@ -42,6 +42,8 @@ self.addEventListener("notificationclick", (event) => {
     data.type === "spark_schedule_ready"
       ? data.type
       : null;
+  const liveTopicSlug =
+    data.type === "live_topic_invite" ? data.live_topic_slug || "" : "";
   const targetUrl =
     data.match_id && (data.type === "spark_session" || data.type === "new_match")
       ? `/?push_type=${encodeURIComponent(data.type)}&spark_match_id=${encodeURIComponent(data.match_id)}`
@@ -49,6 +51,8 @@ self.addEventListener("notificationclick", (event) => {
       ? `/?push_type=new_spark&spark_type=professional&sender_user_id=${encodeURIComponent(professionalSparkSender)}`
       : sparkScheduleType
       ? `/?push_type=${encodeURIComponent(sparkScheduleType)}`
+      : liveTopicSlug
+      ? `/?push_type=live_topic_invite&live_topic_slug=${encodeURIComponent(liveTopicSlug)}`
       : data.url || "/";
   const url = new URL(targetUrl, self.location.origin).href;
 

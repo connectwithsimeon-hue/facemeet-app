@@ -774,6 +774,37 @@ class SupabaseService {
     return List<Map<String, dynamic>>.from(response as List? ?? const []);
   }
 
+  Future<bool> sendPushNotification({
+    required String userId,
+    required String type,
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) async {
+    final senderUserId = currentUserId;
+    final response = await client.functions.invoke(
+      'send_push_notification',
+      body: {
+        'user_id': userId,
+        'target_user_id': userId,
+        if (senderUserId != null) 'sender_user_id': senderUserId,
+        'type': type,
+        'title': title,
+        'body': body,
+        'data': {
+          ...data,
+          'type': type,
+          if (senderUserId != null) 'sender_user_id': senderUserId,
+        },
+      },
+    );
+    final responseData = response.data;
+    if (responseData is Map) {
+      return ((responseData['sent'] as num?)?.toInt() ?? 0) > 0;
+    }
+    return false;
+  }
+
   Future<Map<String, dynamic>> createLiveTopicFromConnection({
     required String cohostUserId,
     required String title,

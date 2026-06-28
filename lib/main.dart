@@ -164,6 +164,7 @@ class _SplashScreenState extends State<SplashScreen>
         final professionalSparkSenderId = _professionalSparkSenderFromUrl(
           Uri.base,
         );
+        final liveTopicSlug = _liveTopicSlugFromUrl(Uri.base);
         final routeOverride = _routeFromPushUrl(Uri.base);
         final route = AppRoutes.routeAfterAuth(onboardingComplete: isComplete);
         if (mounted) {
@@ -172,6 +173,12 @@ class _SplashScreenState extends State<SplashScreen>
               AppRoutes.professionalSparkRevealScreen,
               (r) => false,
               arguments: {'senderUserId': professionalSparkSenderId},
+            );
+          } else if (isComplete && liveTopicSlug != null) {
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.liveTopicDetailScreen,
+              (r) => false,
+              arguments: {'slug': liveTopicSlug},
             );
           } else if (isComplete && routeOverride != null) {
             Navigator.of(
@@ -237,6 +244,18 @@ class _SplashScreenState extends State<SplashScreen>
         senderUserId != null &&
         senderUserId.isNotEmpty) {
       return senderUserId;
+    }
+    return null;
+  }
+
+  String? _liveTopicSlugFromUrl(Uri uri) {
+    final pushType = uri.queryParameters['push_type']
+        ?.trim()
+        .toLowerCase()
+        .replaceAll('-', '_');
+    final slug = uri.queryParameters['live_topic_slug']?.trim();
+    if (pushType == 'live_topic_invite' && slug != null && slug.isNotEmpty) {
+      return slug;
     }
     return null;
   }

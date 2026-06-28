@@ -372,6 +372,8 @@ class PushNotificationService {
       case 'event_waitlisted':
       case 'event_rejected':
         return 'FaceMeet Events';
+      case 'live_topic_invite':
+        return 'Live Topic Invite';
       default:
         return 'FaceMeet';
     }
@@ -410,6 +412,8 @@ class PushNotificationService {
       case 'event_waitlisted':
       case 'event_rejected':
         return 'Open FaceMeet to view your event status.';
+      case 'live_topic_invite':
+        return 'Tap to accept or decline.';
       default:
         return '';
     }
@@ -684,6 +688,21 @@ class PushNotificationService {
             );
           }
         }
+        break;
+      case 'live_topic_invite':
+        final slug = data['live_topic_slug']?.toString().trim();
+        final liveTopicId = data['live_topic_id']?.toString().trim();
+        _log(
+          'LIVE TOPIC: invite notification tapped — slugPresent=${slug != null && slug.isNotEmpty}, idPresent=${liveTopicId != null && liveTopicId.isNotEmpty}',
+        );
+        navigator.pushNamed(
+          AppRoutes.liveTopicDetailScreen,
+          arguments: {
+            if (slug != null && slug.isNotEmpty) 'slug': slug,
+            if (liveTopicId != null && liveTopicId.isNotEmpty)
+              'liveTopicId': liveTopicId,
+          },
+        );
         break;
       default:
         if (_isSparkScheduleNotificationType(type)) {

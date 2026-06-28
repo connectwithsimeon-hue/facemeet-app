@@ -54,6 +54,12 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
   bool _isStartingSession = false;
   String? _lastIncomingSparkSessionId;
 
+  // Pending curated Live Topic invite/waiting state for this connection.
+  Map<String, dynamic>? _pendingLiveTopic;
+  Timer? _liveTopicInviteTimer;
+  bool _isLoadingLiveTopicInvite = false;
+  bool _isLiveTopicActionBusy = false;
+
   String get _matchId =>
       widget.conversation['matchId'] as String? ??
       widget.conversation['id'] as String? ??
@@ -71,6 +77,10 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     _subscribeToSparkRequests();
     _checkForActiveSparkRequest();
     _initPresence();
+    _loadPendingLiveTopic();
+    _liveTopicInviteTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      unawaited(_loadPendingLiveTopic(silent: true));
+    });
   }
 
   @override
@@ -80,6 +90,7 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     _messagesChannel?.unsubscribe();
     _sparkRequestChannel?.unsubscribe();
     _presenceWatchChannel?.unsubscribe();
+    _liveTopicInviteTimer?.cancel();
     super.dispose();
   }
 
@@ -586,6 +597,113 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     );
   }
 
+  Future<void> _loadPendingLiveTopic({bool silent = false}) async {
+    final uid = SupabaseService.instance.currentUserId;
+    if (uid == null || _otherUserId.isEmpty) return;
+    if (_isLoadingLiveTopicInvite) return;
+
+    if (mounted && !silent) {
+      setState(() => _isLoadingLiveTopicInvite = true);
+    } else {
+      _isLoadingLiveTopicInvite = true;
+    }
+
+    try {
+      final topics = await SupabaseService.instance.listMyLiveTopics();
+      Map<String, dynamic>? pending;
+      for (final topic in topics) {
+        final status = topic['status']?.toString();
+        if (status != 'pending_cohost_acceptance') continue;
+
+        final creatorId = topic['creator_user_id']?.toString();
+        final cohostId = topic['cohost_user_id']?.toString();
+        final belongsToThisConversation =
+            (creatorId == uid && cohostId == _otherUserId) ||
+            (creatorId == _otherUserId && cohostId == uid);
+        if (belongsToThisConversation) {
+          pending = topic;
+          break;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _pendingLiveTopic = pending;
+        _isLoadingLiveTopicInvite = false;
+      });
+    } catch (error) {
+      debugPrint('LIVE TOPIC CHAT: pending invite load failed — $error');
+      if (mounted) {
+        setState(() => _isLoadingLiveTopicInvite = false);
+      } else {
+        _isLoadingLiveTopicInvite = false;
+      }
+    }
+  }
+
+  bool get _isPendingLiveTopicInvite {
+    final uid = SupabaseService.instance.currentUserId;
+    final topic = _pendingLiveTopic;
+    return uid != null &&
+        topic != null &&
+        topic['cohost_user_id']?.toString() == uid &&
+        topic['creator_user_id']?.toString() == _otherUserId;
+  }
+
+  Future<void> _respondToLiveTopicInvite(bool accept) async {
+    final id = _pendingLiveTopic?['id']?.toString();
+    if (id == null || id.isEmpty) return;
+
+    setState(() => _isLiveTopicActionBusy = true);
+    try {
+      final updated = await SupabaseService.instance
+          .respondLiveTopicCohostInvite(liveTopicId: id, accept: accept);
+      if (!mounted) return;
+      if (accept) {
+        setState(() {
+          _pendingLiveTopic = updated['status'] == 'pending_cohost_acceptance'
+              ? updated
+              : null;
+        });
+        Navigator.pushNamed(
+          context,
+          AppRoutes.liveTopicDetailScreen,
+          arguments: {'liveTopic': updated},
+        );
+      } else {
+        setState(() => _pendingLiveTopic = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Live Topic invite declined.'),
+            backgroundColor: AppTheme.primary,
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('LIVE TOPIC CHAT: invite response failed — $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLiveTopicActionBusy = false);
+    }
+  }
+
+  void _viewPendingLiveTopic() {
+    final topic = _pendingLiveTopic;
+    if (topic == null) return;
+    Navigator.pushNamed(
+      context,
+      AppRoutes.liveTopicDetailScreen,
+      arguments: {'liveTopic': topic},
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isOnline = _isOtherUserOnline;
@@ -620,6 +738,17 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
               ),
             ),
             if (_otherUserId.isNotEmpty) _buildSafetyBar(),
+            if (_pendingLiveTopic != null)
+              _LiveTopicInviteCard(
+                topic: _pendingLiveTopic!,
+                otherName: _otherName,
+                isInviteForMe: _isPendingLiveTopicInvite,
+                isBusy: _isLiveTopicActionBusy,
+                onAccept: () => _respondToLiveTopicInvite(true),
+                onDecline: () => _respondToLiveTopicInvite(false),
+                onView: _viewPendingLiveTopic,
+                onRefresh: () => _loadPendingLiveTopic(silent: false),
+              ),
             // Messages
             Expanded(
               child: _isLoadingMessages
@@ -1056,6 +1185,208 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
             widget.onBack?.call();
           }
         },
+      ),
+    );
+  }
+}
+
+class _LiveTopicInviteCard extends StatelessWidget {
+  final Map<String, dynamic> topic;
+  final String otherName;
+  final bool isInviteForMe;
+  final bool isBusy;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+  final VoidCallback onView;
+  final VoidCallback onRefresh;
+
+  const _LiveTopicInviteCard({
+    required this.topic,
+    required this.otherName,
+    required this.isInviteForMe,
+    required this.isBusy,
+    required this.onAccept,
+    required this.onDecline,
+    required this.onView,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final title = topic['title']?.toString().trim();
+    final topicTitle = title == null || title.isEmpty
+        ? 'this Live Topic'
+        : title;
+    final headline = isInviteForMe
+        ? 'Live Topic Invite'
+        : 'Waiting for $otherName';
+    final body = isInviteForMe
+        ? '$otherName invited you to co-host "$topicTitle". Accept when you are ready to help open the room.'
+        : '$otherName needs to accept "$topicTitle" before the Live Topic room is ready.';
+
+    return Container(
+      color: const Color(0xCC0D0D0F),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceGlass,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.primary.withValues(alpha: 0.34)),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primary.withValues(alpha: 0.10),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.forum_rounded,
+                    color: AppTheme.primary,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        headline,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.dmSans(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        body,
+                        style: GoogleFonts.dmSans(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (isInviteForMe)
+              Row(
+                children: [
+                  Expanded(
+                    child: _LiveTopicCardButton(
+                      label: 'Decline',
+                      icon: Icons.close_rounded,
+                      onTap: isBusy ? null : onDecline,
+                      isPrimary: false,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _LiveTopicCardButton(
+                      label: 'Accept',
+                      icon: Icons.check_rounded,
+                      onTap: isBusy ? null : onAccept,
+                      isPrimary: true,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: _LiveTopicCardButton(
+                      label: 'Refresh',
+                      icon: Icons.refresh_rounded,
+                      onTap: isBusy ? null : onRefresh,
+                      isPrimary: false,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _LiveTopicCardButton(
+                      label: 'View',
+                      icon: Icons.open_in_new_rounded,
+                      onTap: isBusy ? null : onView,
+                      isPrimary: true,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LiveTopicCardButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool isPrimary;
+
+  const _LiveTopicCardButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    required this.isPrimary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: onTap == null ? 0.55 : 1,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          decoration: BoxDecoration(
+            color: isPrimary ? AppTheme.primary : AppTheme.surfaceGlassVariant,
+            borderRadius: BorderRadius.circular(14),
+            border: isPrimary ? null : Border.all(color: AppTheme.borderGlass),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: isPrimary ? Colors.white : AppTheme.textSecondary,
+                size: 17,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.dmSans(
+                  color: isPrimary ? Colors.white : AppTheme.textSecondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

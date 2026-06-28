@@ -69,6 +69,7 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
             curatedTopicId: selectedTopicId,
             visibility: _visibility,
           );
+      unawaited(_sendCohostInvitePush(liveTopic));
       if (!mounted) return;
       Navigator.pushReplacementNamed(
         context,
@@ -79,6 +80,41 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
       _showSnack(_friendlyError(error));
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _sendCohostInvitePush(Map<String, dynamic> liveTopic) async {
+    try {
+      final creatorProfile = await SupabaseService.instance
+          .getCurrentUserProfile();
+      final creatorName =
+          creatorProfile?['first_name']?.toString().trim().isNotEmpty == true
+          ? creatorProfile!['first_name'].toString().trim()
+          : 'Someone';
+      final title = liveTopic['title']?.toString().trim();
+      final slug = liveTopic['public_slug']?.toString().trim();
+      final id = liveTopic['id']?.toString().trim();
+      await SupabaseService.instance.sendPushNotification(
+        userId: widget.cohostUserId,
+        type: 'live_topic_invite',
+        title: '$creatorName invited you to co-host a Live Topic',
+        body: title != null && title.isNotEmpty
+            ? '"$title"'
+            : 'Tap to accept or decline.',
+        data: {
+          if (id != null && id.isNotEmpty) 'live_topic_id': id,
+          if (slug != null && slug.isNotEmpty) 'live_topic_slug': slug,
+          if (title != null && title.isNotEmpty) 'topic_title': title,
+          if (SupabaseService.instance.currentUserId != null)
+            'creator_user_id': SupabaseService.instance.currentUserId,
+          'cohost_user_id': widget.cohostUserId,
+          if (slug != null && slug.isNotEmpty)
+            'url':
+                'https://app.facemeet.app/?push_type=live_topic_invite&live_topic_slug=$slug',
+        },
+      );
+    } catch (error) {
+      debugPrint('LIVE TOPIC PUSH: invite send skipped — $error');
     }
   }
 
@@ -213,6 +249,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
   Map<String, dynamic>? _liveTopic;
   List<Map<String, dynamic>> _joinRequests = const [];
   Timer? _timer;
+  Timer? _statusRefreshTimer;
   bool _isBusy = false;
   bool _isLoading = true;
 
@@ -224,19 +261,29 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+      final status = _liveTopic?['status']?.toString();
+      if (status == 'pending_cohost_acceptance' || status == 'ready') {
+        unawaited(_load(silent: true));
+      }
+    });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _statusRefreshTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     try {
       Map<String, dynamic>? topic = _liveTopic;
-      if (topic == null && widget.slug != null) {
-        topic = await SupabaseService.instance.getLiveTopicBySlug(widget.slug!);
+      final slug = widget.slug?.trim().isNotEmpty == true
+          ? widget.slug!.trim()
+          : _liveTopic?['public_slug']?.toString().trim();
+      if (slug != null && slug.isNotEmpty) {
+        topic = await SupabaseService.instance.getLiveTopicBySlug(slug);
       }
       if (topic != null) {
         final requests = await SupabaseService.instance
@@ -249,10 +296,10 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
           });
         }
       } else if (mounted) {
-        setState(() => _isLoading = false);
+        if (!silent) setState(() => _isLoading = false);
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && !silent) setState(() => _isLoading = false);
     }
   }
 
@@ -396,6 +443,31 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                   const SizedBox(height: 14),
                   _ShareCard(url: _shareUrl, onShare: _share),
                   const SizedBox(height: 18),
+                  if (_isCohostInvite) ...[
+                    _CohostInviteNoticeCard(
+                      creatorName:
+                          (topic['host_profile'] is Map
+                                  ? topic['host_profile']['first_name']
+                                  : null)
+                              ?.toString() ??
+                          'Your connection',
+                      title: topic['title']?.toString() ?? 'this Live Topic',
+                    ),
+                    const SizedBox(height: 14),
+                  ] else if (topic['status'] ==
+                      'pending_cohost_acceptance') ...[
+                    _WaitingForCohostCard(
+                      cohostName:
+                          (topic['cohost_profile'] is Map
+                                  ? topic['cohost_profile']['first_name']
+                                  : null)
+                              ?.toString() ??
+                          'Your co-host',
+                      title: topic['title']?.toString() ?? 'this Live Topic',
+                      onRefresh: _isBusy ? null : () => _load(silent: false),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                   if (_isCohostInvite) _buildInviteActions(),
                   if (_isHostOrCohost) _buildHostActions(topic),
                   if (!_isHostOrCohost && topic['status'] == 'live')
@@ -505,9 +577,10 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
           ),
         ],
         if (status == 'pending_cohost_acceptance')
-          Text(
-            'Waiting for your co-host to accept.',
-            style: GoogleFonts.dmSans(color: AppTheme.textMuted),
+          _SecondaryActionButton(
+            label: 'Refresh status',
+            icon: Icons.refresh_rounded,
+            onPressed: _isBusy ? null : () => _load(silent: false),
           ),
       ],
     );
@@ -832,7 +905,22 @@ class _LiveRoomCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLive = topic['status'] == 'live';
+    final status = topic['status']?.toString() ?? '';
+    final isLive = status == 'live';
+    final isPending = status == 'pending_cohost_acceptance';
+    final isReady = status == 'ready';
+    final title = isPending
+        ? 'Waiting for Co-host'
+        : isReady
+        ? 'Ready to Start'
+        : 'Live Topic Room';
+    final subtitle = isLive
+        ? 'Time remaining $timerText'
+        : isReady
+        ? 'Start when you and your co-host are ready.'
+        : isPending
+        ? 'Your co-host needs to accept before the room opens.'
+        : 'Video stage coming next';
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -853,7 +941,7 @@ class _LiveRoomCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Live Topic Room',
+            title,
             style: GoogleFonts.dmSans(
               color: Colors.white,
               fontSize: 24,
@@ -862,11 +950,129 @@ class _LiveRoomCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            isLive ? 'Time remaining $timerText' : 'Video stage coming next',
+            subtitle,
+            textAlign: TextAlign.center,
             style: GoogleFonts.dmSans(
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.w600,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CohostInviteNoticeCard extends StatelessWidget {
+  final String creatorName;
+  final String title;
+
+  const _CohostInviteNoticeCard({
+    required this.creatorName,
+    required this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.group_add_rounded, color: AppTheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Live Topic Invite',
+                  style: GoogleFonts.dmSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$creatorName invited you to co-host "$title". Accept when you are ready to help open the room.',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WaitingForCohostCard extends StatelessWidget {
+  final String cohostName;
+  final String title;
+  final VoidCallback? onRefresh;
+
+  const _WaitingForCohostCard({
+    required this.cohostName,
+    required this.title,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.hourglass_top_rounded, color: AppTheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Waiting for $cohostName',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'The room for "$title" will be ready after your co-host accepts. No timer starts yet.',
+                      style: GoogleFonts.dmSans(
+                        color: AppTheme.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _SecondaryActionButton(
+            label: 'Refresh status',
+            icon: Icons.refresh_rounded,
+            onPressed: onRefresh,
           ),
         ],
       ),
