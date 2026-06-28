@@ -245,7 +245,8 @@ class LiveTopicDetailScreen extends StatefulWidget {
   State<LiveTopicDetailScreen> createState() => _LiveTopicDetailScreenState();
 }
 
-class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
+class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
+    with WidgetsBindingObserver {
   Map<String, dynamic>? _liveTopic;
   List<Map<String, dynamic>> _joinRequests = const [];
   Timer? _timer;
@@ -256,14 +257,15 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _liveTopic = widget.initialLiveTopic;
     _load();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
-    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       final status = _liveTopic?['status']?.toString();
-      if (status == 'pending_cohost_acceptance' || status == 'ready') {
+      if (_shouldRefreshStatus(status)) {
         unawaited(_load(silent: true));
       }
     });
@@ -271,9 +273,23 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _statusRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_load(silent: true));
+    }
+  }
+
+  bool _shouldRefreshStatus(String? status) {
+    return status == 'pending_cohost_acceptance' ||
+        status == 'ready' ||
+        status == 'live';
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -298,7 +314,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
       } else if (mounted) {
         if (!silent) setState(() => _isLoading = false);
       }
-    } catch (_) {
+    } catch (error) {
+      debugPrint('LIVE TOPIC: status refresh failed — $error');
       if (mounted && !silent) setState(() => _isLoading = false);
     }
   }
@@ -344,13 +361,69 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
       final updated = await action();
       if (mounted) {
         setState(() => _liveTopic = updated);
-        await _load();
+        await _load(silent: true);
       }
     } catch (error) {
-      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      debugPrint('LIVE TOPIC: action failed — $error');
+      await _load(silent: true);
+      _showSnack(_friendlyLiveTopicError(error));
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
+  }
+
+  Future<void> _endRoom(String liveTopicId) async {
+    setState(() => _isBusy = true);
+    try {
+      final updated = await SupabaseService.instance.endLiveTopic(liveTopicId);
+      if (mounted) {
+        setState(() => _liveTopic = updated);
+        await _load(silent: true);
+        _showSnack('This Live Topic has ended.');
+      }
+    } catch (error) {
+      debugPrint('LIVE TOPIC: end failed — $error');
+      await _load(silent: true);
+      if (_isAlreadyClosedError(error)) {
+        _showSnack('This Live Topic has already ended.');
+      } else {
+        _showSnack(_friendlyLiveTopicError(error));
+      }
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  bool _isAlreadyClosedError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('topic_not_open') ||
+        text.contains('already_ended') ||
+        text.contains('cancelled') ||
+        text.contains('declined');
+  }
+
+  String _friendlyLiveTopicError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('topic_not_open')) {
+      return 'This Live Topic is no longer open.';
+    }
+    if (text.contains('not_host_or_cohost')) {
+      return 'Only a host or co-host can do that.';
+    }
+    if (text.contains('insufficient_sparks') ||
+        text.contains('not_enough_sparks')) {
+      return 'You need 1 Spark to continue this Live Topic.';
+    }
+    if (text.contains('cohost_not_accepted')) {
+      return 'Your co-host must accept before the room can start.';
+    }
+    if (text.contains('topic_not_ready')) {
+      return 'This Live Topic is not ready yet.';
+    }
+    if (text.contains('already_ended')) {
+      return 'This Live Topic has already ended.';
+    }
+    return 'Something went wrong. Please refresh and try again.';
   }
 
   Future<void> _share() async {
@@ -373,7 +446,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
       await SupabaseService.instance.requestToJoinLiveTopic(liveTopicId: id);
       _showSnack('Request sent.');
     } catch (error) {
-      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      debugPrint('LIVE TOPIC: request to join failed — $error');
+      _showSnack(_friendlyLiveTopicError(error));
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
@@ -388,7 +462,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
       );
       await _load();
     } catch (error) {
-      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      debugPrint('LIVE TOPIC: join request decision failed — $error');
+      _showSnack(_friendlyLiveTopicError(error));
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
@@ -404,6 +479,9 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final topic = _liveTopic;
+    final status = topic?['status']?.toString() ?? '';
+    final isEnded =
+        status == 'ended' || status == 'cancelled' || status == 'declined';
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
       appBar: AppBar(
@@ -441,9 +519,17 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                     status: topic['status']?.toString() ?? 'pending',
                   ),
                   const SizedBox(height: 14),
-                  _ShareCard(url: _shareUrl, onShare: _share),
-                  const SizedBox(height: 18),
-                  if (_isCohostInvite) ...[
+                  if (isEnded) ...[
+                    _EndedTopicCard(
+                      title: topic['title']?.toString() ?? 'this Live Topic',
+                      onBack: () => Navigator.pop(context),
+                    ),
+                    const SizedBox(height: 18),
+                  ] else ...[
+                    _ShareCard(url: _shareUrl, onShare: _share),
+                    const SizedBox(height: 18),
+                  ],
+                  if (!isEnded && _isCohostInvite) ...[
                     _CohostInviteNoticeCard(
                       creatorName:
                           (topic['host_profile'] is Map
@@ -454,8 +540,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                       title: topic['title']?.toString() ?? 'this Live Topic',
                     ),
                     const SizedBox(height: 14),
-                  ] else if (topic['status'] ==
-                      'pending_cohost_acceptance') ...[
+                  ] else if (!isEnded &&
+                      topic['status'] == 'pending_cohost_acceptance') ...[
                     _WaitingForCohostCard(
                       cohostName:
                           (topic['cohost_profile'] is Map
@@ -468,15 +554,17 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                     ),
                     const SizedBox(height: 14),
                   ],
-                  if (_isCohostInvite) _buildInviteActions(),
-                  if (_isHostOrCohost) _buildHostActions(topic),
-                  if (!_isHostOrCohost && topic['status'] == 'live')
+                  if (!isEnded && _isCohostInvite) _buildInviteActions(),
+                  if (!isEnded && _isHostOrCohost) _buildHostActions(topic),
+                  if (!isEnded && !_isHostOrCohost && topic['status'] == 'live')
                     _ActionButton(
                       label: 'Request to Join',
                       icon: Icons.record_voice_over_rounded,
                       onPressed: _isBusy ? null : _requestToJoin,
                     ),
-                  if (_isHostOrCohost && _joinRequests.isNotEmpty) ...[
+                  if (!isEnded &&
+                      _isHostOrCohost &&
+                      _joinRequests.isNotEmpty) ...[
                     const SizedBox(height: 20),
                     _JoinRequestList(
                       requests: _joinRequests,
@@ -493,14 +581,15 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
                       foregroundColor: AppTheme.textSecondary,
                     ),
                   ),
-                  TextButton.icon(
-                    onPressed: () => _showSnack('Report flow coming next.'),
-                    icon: const Icon(Icons.flag_outlined),
-                    label: const Text('Report Live Topic'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.textMuted,
+                  if (!isEnded)
+                    TextButton.icon(
+                      onPressed: () => _showSnack('Report flow coming next.'),
+                      icon: const Icon(Icons.flag_outlined),
+                      label: const Text('Report Live Topic'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.textMuted,
+                      ),
                     ),
-                  ),
                 ],
               ),
       ),
@@ -569,11 +658,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen> {
           _SecondaryActionButton(
             label: 'End Room',
             icon: Icons.stop_circle_outlined,
-            onPressed: _isBusy
-                ? null
-                : () => _runAction(
-                    () => SupabaseService.instance.endLiveTopic(id),
-                  ),
+            onPressed: _isBusy ? null : () => _endRoom(id),
           ),
         ],
         if (status == 'pending_cohost_acceptance')
@@ -909,10 +994,14 @@ class _LiveRoomCard extends StatelessWidget {
     final isLive = status == 'live';
     final isPending = status == 'pending_cohost_acceptance';
     final isReady = status == 'ready';
+    final isEnded =
+        status == 'ended' || status == 'cancelled' || status == 'declined';
     final title = isPending
         ? 'Waiting for Co-host'
         : isReady
         ? 'Ready to Start'
+        : isEnded
+        ? 'Live Topic Ended'
         : 'Live Topic Room';
     final subtitle = isLive
         ? 'Time remaining $timerText'
@@ -920,6 +1009,8 @@ class _LiveRoomCard extends StatelessWidget {
         ? 'Start when you and your co-host are ready.'
         : isPending
         ? 'Your co-host needs to accept before the room opens.'
+        : isEnded
+        ? 'This conversation has ended.'
         : 'Video stage coming next';
     return Container(
       padding: const EdgeInsets.all(20),
@@ -956,6 +1047,77 @@ class _LiveRoomCard extends StatelessWidget {
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.w600,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EndedTopicCard extends StatelessWidget {
+  final String title;
+  final VoidCallback onBack;
+
+  const _EndedTopicCard({required this.title, required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This Live Topic has ended.',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '"$title" is no longer active. You can return to chat whenever you are ready.',
+                      style: GoogleFonts.dmSans(
+                        color: AppTheme.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _SecondaryActionButton(
+            label: 'Return to Chat',
+            icon: Icons.arrow_back_rounded,
+            onPressed: onBack,
           ),
         ],
       ),
