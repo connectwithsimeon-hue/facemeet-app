@@ -76,6 +76,64 @@ class DailyAccessResult {
   }
 }
 
+class LiveTopicDailyAccessResult {
+  final String liveTopicId;
+  final String roomUrl;
+  final String meetingToken;
+  final DateTime roomExpiresAt;
+  final DateTime tokenExpiresAt;
+  final int maxParticipants;
+
+  const LiveTopicDailyAccessResult({
+    required this.liveTopicId,
+    required this.roomUrl,
+    required this.meetingToken,
+    required this.roomExpiresAt,
+    required this.tokenExpiresAt,
+    required this.maxParticipants,
+  });
+
+  factory LiveTopicDailyAccessResult.fromMap(Map<String, dynamic> data) {
+    final liveTopicId = (data['live_topic_id'] as String? ?? '').trim();
+    final roomUrl = (data['room_url'] as String? ?? '').trim();
+    final meetingToken = (data['meeting_token'] as String? ?? '').trim();
+    final roomExpiresAtRaw = (data['room_expires_at'] as String? ?? '').trim();
+    final tokenExpiresAtRaw = (data['token_expires_at'] as String? ?? '')
+        .trim();
+    final maxParticipants = (data['max_participants'] as num?)?.toInt() ?? 0;
+
+    if (liveTopicId.isEmpty ||
+        roomUrl.isEmpty ||
+        meetingToken.isEmpty ||
+        roomExpiresAtRaw.isEmpty ||
+        tokenExpiresAtRaw.isEmpty ||
+        maxParticipants <= 0) {
+      throw DailyAccessException(
+        message: 'Live Topic video is unavailable',
+        code: 'malformed_live_topic_daily_access_response',
+      );
+    }
+
+    final roomExpiresAt = DateTime.tryParse(roomExpiresAtRaw);
+    final tokenExpiresAt = DateTime.tryParse(tokenExpiresAtRaw);
+    if (roomExpiresAt == null || tokenExpiresAt == null) {
+      throw DailyAccessException(
+        message: 'Live Topic video is unavailable',
+        code: 'malformed_live_topic_daily_access_response',
+      );
+    }
+
+    return LiveTopicDailyAccessResult(
+      liveTopicId: liveTopicId,
+      roomUrl: roomUrl,
+      meetingToken: meetingToken,
+      roomExpiresAt: roomExpiresAt,
+      tokenExpiresAt: tokenExpiresAt,
+      maxParticipants: maxParticipants,
+    );
+  }
+}
+
 class DailyService {
   static DailyService? _instance;
   static DailyService get instance => _instance ??= DailyService._();
@@ -199,6 +257,51 @@ class DailyService {
     }
   }
 
+  Future<LiveTopicDailyAccessResult> getLiveTopicDailyAccess({
+    required String liveTopicId,
+  }) async {
+    final safeLiveTopicId = liveTopicId.trim();
+    if (safeLiveTopicId.isEmpty) {
+      throw Exception('invalid live topic');
+    }
+
+    try {
+      debugPrint(
+        'LIVE TOPIC DAILY ACCESS: invoking live_topic_get_daily_access for liveTopicId=$safeLiveTopicId',
+      );
+      final response = await SupabaseService.instance.client.functions.invoke(
+        'live_topic_get_daily_access',
+        body: {'live_topic_id': safeLiveTopicId},
+      );
+
+      final data = response.data;
+      if (data is Map && data['error'] != null) {
+        throw DailyAccessException(
+          message: data['error'].toString(),
+          code: data['error_code']?.toString() ?? 'daily_access_failed',
+        );
+      }
+      if (data is! Map) {
+        throw DailyAccessException(
+          message: 'Live Topic video is unavailable',
+          code: 'malformed_live_topic_daily_access_response',
+        );
+      }
+
+      final parsed = LiveTopicDailyAccessResult.fromMap(
+        Map<String, dynamic>.from(data),
+      );
+      debugPrint(
+        'LIVE TOPIC DAILY ACCESS: access granted for liveTopicId=${parsed.liveTopicId}, token_present=${parsed.meetingToken.isNotEmpty}',
+      );
+      return parsed;
+    } catch (error) {
+      final message = _safeLiveTopicErrorMessage(error);
+      debugPrint('LIVE TOPIC DAILY ACCESS: request failed — $message');
+      throw Exception(message);
+    }
+  }
+
   bool _isTransientErrorCode(String code) {
     return const {
       'daily_access_failed',
@@ -247,6 +350,28 @@ class DailyService {
       return 'spark session unavailable';
     }
     return 'Daily video service is temporarily unavailable. Please try again later.';
+  }
+
+  String _safeLiveTopicErrorMessage(Object error) {
+    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    if (raw.contains('authentication required')) {
+      return 'authentication required';
+    }
+    if (raw.contains('host or co-host') ||
+        raw.contains('daily_access_denied')) {
+      return 'You can only join this Live Topic as a host or co-host.';
+    }
+    if (raw.contains('not started') || raw.contains('room_not_live')) {
+      return 'This Live Topic has not started yet.';
+    }
+    if (raw.contains('ended') || raw.contains('room_ended')) {
+      return 'This Live Topic has ended.';
+    }
+    if (raw.contains('no longer available') ||
+        raw.contains('NoLongerAvailable')) {
+      return 'This video room is no longer available. Please refresh or start a new Live Topic.';
+    }
+    return 'Could not connect to the Live Topic video. Please try again.';
   }
 
   /// Whether we're on a platform that supports the Daily Flutter SDK

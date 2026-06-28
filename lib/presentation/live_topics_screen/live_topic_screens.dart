@@ -1,12 +1,16 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../routes/app_routes.dart';
+import '../../services/daily_service.dart';
 import '../../services/supabase_service.dart';
 import '../../theme/app_theme.dart';
+import '../../services/daily_call_web.dart'
+    if (dart.library.io) '../../services/daily_call_io.dart';
 
 class CreateLiveTopicScreen extends StatefulWidget {
   final String cohostUserId;
@@ -251,8 +255,14 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   List<Map<String, dynamic>> _joinRequests = const [];
   Timer? _timer;
   Timer? _statusRefreshTimer;
+  final GlobalKey<DailyCallViewState> _dailyCallKey =
+      GlobalKey<DailyCallViewState>();
   bool _isBusy = false;
   bool _isLoading = true;
+  bool _isLoadingDailyAccess = false;
+  String? _dailyRoomUrl;
+  String? _dailyMeetingToken;
+  String? _dailyAccessError;
 
   @override
   void initState() {
@@ -310,6 +320,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
             _joinRequests = requests;
             _isLoading = false;
           });
+          await _syncDailyForTopic(topic);
         }
       } else if (mounted) {
         if (!silent) setState(() => _isLoading = false);
@@ -376,6 +387,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     setState(() => _isBusy = true);
     try {
       final updated = await SupabaseService.instance.endLiveTopic(liveTopicId);
+      await _leaveDailyCall();
       if (mounted) {
         setState(() => _liveTopic = updated);
         await _load(silent: true);
@@ -392,6 +404,111 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
+  }
+
+  Future<void> _syncDailyForTopic(Map<String, dynamic> topic) async {
+    final status = topic['status']?.toString();
+    if (status == 'ended' || status == 'cancelled' || status == 'declined') {
+      await _leaveDailyCall();
+      if (mounted) {
+        setState(() {
+          _dailyRoomUrl = null;
+          _dailyMeetingToken = null;
+          _dailyAccessError = null;
+          _isLoadingDailyAccess = false;
+        });
+      }
+      return;
+    }
+
+    if (kIsWeb || !_isHostOrCohost || status != 'live') {
+      return;
+    }
+
+    if ((_dailyRoomUrl?.isNotEmpty ?? false) &&
+        (_dailyMeetingToken?.isNotEmpty ?? false)) {
+      return;
+    }
+
+    await _loadDailyAccess();
+  }
+
+  Future<void> _loadDailyAccess({bool force = false}) async {
+    final id = _liveTopic?['id']?.toString();
+    if (id == null || id.isEmpty || kIsWeb || !_isHostOrCohost) return;
+    if (_isLoadingDailyAccess) return;
+    if (!force &&
+        (_dailyRoomUrl?.isNotEmpty ?? false) &&
+        (_dailyMeetingToken?.isNotEmpty ?? false)) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingDailyAccess = true;
+      _dailyAccessError = null;
+      if (force) {
+        _dailyRoomUrl = null;
+        _dailyMeetingToken = null;
+      }
+    });
+
+    try {
+      final access = await DailyService.instance.getLiveTopicDailyAccess(
+        liveTopicId: id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _dailyRoomUrl = access.roomUrl;
+        _dailyMeetingToken = access.meetingToken;
+        _dailyAccessError = null;
+        _isLoadingDailyAccess = false;
+      });
+    } catch (error) {
+      debugPrint('LIVE TOPIC DAILY: access failed — $error');
+      if (!mounted) return;
+      setState(() {
+        _dailyAccessError = _friendlyDailyAccessError(error);
+        _isLoadingDailyAccess = false;
+      });
+    }
+  }
+
+  Future<Map<String, String>?> _refreshDailyAccess() async {
+    await _loadDailyAccess(force: true);
+    final roomUrl = _dailyRoomUrl?.trim() ?? '';
+    final meetingToken = _dailyMeetingToken?.trim() ?? '';
+    if (roomUrl.isEmpty || meetingToken.isEmpty) return null;
+    return {'roomUrl': roomUrl, 'meetingToken': meetingToken};
+  }
+
+  Future<void> _leaveDailyCall() async {
+    try {
+      await _dailyCallKey.currentState?.leave();
+    } catch (error) {
+      debugPrint('LIVE TOPIC DAILY: leave failed safely — $error');
+    }
+  }
+
+  Future<void> _leaveRoom() async {
+    await _leaveDailyCall();
+    if (mounted) Navigator.pop(context);
+  }
+
+  String _friendlyDailyAccessError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('host or co-host')) {
+      return 'You can only join this Live Topic as a host or co-host.';
+    }
+    if (text.contains('not started')) {
+      return 'This Live Topic has not started yet.';
+    }
+    if (text.contains('ended')) {
+      return 'This Live Topic has ended.';
+    }
+    if (text.contains('no longer available')) {
+      return 'This video room is no longer available. Please refresh or start a new Live Topic.';
+    }
+    return 'Could not connect to the Live Topic video. Please try again.';
   }
 
   bool _isAlreadyClosedError(Object error) {
@@ -505,6 +622,21 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                 children: [
                   _LiveRoomCard(topic: topic, timerText: _timeRemaining),
                   const SizedBox(height: 18),
+                  if (status == 'live') ...[
+                    _LiveTopicVideoStage(
+                      isHostOrCohost: _isHostOrCohost,
+                      isWeb: kIsWeb,
+                      isLoading: _isLoadingDailyAccess,
+                      error: _dailyAccessError,
+                      roomUrl: _dailyRoomUrl,
+                      meetingToken: _dailyMeetingToken,
+                      dailyCallKey: _dailyCallKey,
+                      onRetry: () => _loadDailyAccess(force: true),
+                      onEnded: () => unawaited(_load(silent: true)),
+                      onRefreshDailyAccess: _refreshDailyAccess,
+                    ),
+                    const SizedBox(height: 18),
+                  ],
                   _InfoCard(
                     title: topic['title']?.toString() ?? 'Live Topic',
                     body:
@@ -574,7 +706,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                   ],
                   const SizedBox(height: 12),
                   TextButton.icon(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _leaveRoom,
                     icon: const Icon(Icons.logout_rounded),
                     label: const Text('Leave Room'),
                     style: TextButton.styleFrom(
@@ -1236,6 +1368,173 @@ class _WaitingForCohostCard extends StatelessWidget {
             icon: Icons.refresh_rounded,
             onPressed: onRefresh,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LiveTopicVideoStage extends StatelessWidget {
+  final bool isHostOrCohost;
+  final bool isWeb;
+  final bool isLoading;
+  final String? error;
+  final String? roomUrl;
+  final String? meetingToken;
+  final GlobalKey<DailyCallViewState> dailyCallKey;
+  final VoidCallback onRetry;
+  final VoidCallback onEnded;
+  final Future<Map<String, String>?> Function() onRefreshDailyAccess;
+
+  const _LiveTopicVideoStage({
+    required this.isHostOrCohost,
+    required this.isWeb,
+    required this.isLoading,
+    required this.error,
+    required this.roomUrl,
+    required this.meetingToken,
+    required this.dailyCallKey,
+    required this.onRetry,
+    required this.onEnded,
+    required this.onRefreshDailyAccess,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isHostOrCohost) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.visibility_rounded,
+        title: 'This Live Topic is live',
+        body:
+            'Viewer mode is coming next. Hosts and co-hosts are on video now.',
+      );
+    }
+
+    if (isWeb) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.desktop_windows_rounded,
+        title: 'Live Topic video is ready on mobile',
+        body:
+            'Host and co-host video is available in the iOS and Android app. PWA video support is coming next.',
+      );
+    }
+
+    if (isLoading) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.videocam_rounded,
+        title: 'Connecting video...',
+        body: 'Preparing your secure Live Topic room.',
+        showSpinner: true,
+      );
+    }
+
+    if (error != null && error!.trim().isNotEmpty) {
+      return _VideoPlaceholderCard(
+        icon: Icons.error_outline_rounded,
+        title: 'Could not connect',
+        body: error!,
+        actionLabel: 'Try again',
+        onAction: onRetry,
+      );
+    }
+
+    final safeRoomUrl = roomUrl?.trim() ?? '';
+    final safeMeetingToken = meetingToken?.trim() ?? '';
+    if (safeRoomUrl.isEmpty || safeMeetingToken.isEmpty) {
+      return _VideoPlaceholderCard(
+        icon: Icons.videocam_off_rounded,
+        title: 'Video room not ready',
+        body: 'Refresh to prepare your secure Live Topic video room.',
+        actionLabel: 'Refresh',
+        onAction: onRetry,
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        height: 430,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          border: Border.all(color: AppTheme.borderGlass),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: DailyCallView(
+          key: dailyCallKey,
+          roomUrl: safeRoomUrl,
+          meetingToken: safeMeetingToken,
+          onCallEnded: onEnded,
+          onCallError: (_) {},
+          onRefreshDailyAccess: onRefreshDailyAccess,
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPlaceholderCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  final bool showSpinner;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _VideoPlaceholderCard({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.showSpinner = false,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceGlass,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.borderGlass),
+      ),
+      child: Column(
+        children: [
+          if (showSpinner)
+            const SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(color: AppTheme.primary),
+            )
+          else
+            Icon(icon, color: AppTheme.primary, size: 38),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.dmSans(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.dmSans(
+              color: AppTheme.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 14),
+            _SecondaryActionButton(
+              label: actionLabel!,
+              icon: Icons.refresh_rounded,
+              onPressed: onAction,
+            ),
+          ],
         ],
       ),
     );
