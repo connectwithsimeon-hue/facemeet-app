@@ -14,6 +14,7 @@ import '../presentation/profile_screen/profile_video_record_screen.dart';
 import '../presentation/debug_screen/push_notification_debug_screen.dart';
 import '../presentation/events_screen/events_screen.dart';
 import '../presentation/intro_carousel_screen/intro_carousel_screen.dart';
+import '../presentation/live_topics_screen/live_topic_screens.dart';
 import '../presentation/professional_spark_reveal_screen/professional_spark_reveal_screen.dart';
 import '../widgets/app_navigation.dart';
 
@@ -39,6 +40,8 @@ class AppRoutes {
   static const String profileVideoRecord = '/profile-video-record';
   static const String emailVerificationScreen = '/email-verification-screen';
   static const String pushNotificationDebug = '/push-notification-debug';
+  static const String createLiveTopicScreen = '/create-live-topic';
+  static const String liveTopicDetailScreen = '/live-topic-detail';
 
   static Map<String, WidgetBuilder> routes = {
     initial: (context) => const SplashScreen(),
@@ -84,6 +87,34 @@ class AppRoutes {
     },
     profileVideoRecord: (context) => const ProfileVideoRecordScreen(),
     pushNotificationDebug: (context) => const PushNotificationDebugScreen(),
+    createLiveTopicScreen: (context) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      String cohostUserId = '';
+      String cohostName = 'your co-host';
+      if (args is Map<String, dynamic>) {
+        cohostUserId = args['cohostUserId']?.toString() ?? '';
+        cohostName = args['cohostName']?.toString() ?? cohostName;
+      }
+      return CreateLiveTopicScreen(
+        cohostUserId: cohostUserId,
+        cohostName: cohostName,
+      );
+    },
+    liveTopicDetailScreen: (context) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      Map<String, dynamic>? liveTopic;
+      String? slug;
+      if (args is Map<String, dynamic>) {
+        final topicArg = args['liveTopic'];
+        if (topicArg is Map<String, dynamic>) {
+          liveTopic = topicArg;
+        } else if (topicArg is Map) {
+          liveTopic = Map<String, dynamic>.from(topicArg);
+        }
+        slug = args['slug']?.toString();
+      }
+      return LiveTopicDetailScreen(initialLiveTopic: liveTopic, slug: slug);
+    },
   };
 
   static String routeAfterAuth({required bool onboardingComplete}) {

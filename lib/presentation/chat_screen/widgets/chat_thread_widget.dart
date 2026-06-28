@@ -573,6 +573,19 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     }
   }
 
+  void _startLiveTopic() {
+    if (_otherUserId.isEmpty) return;
+    Navigator.pushNamed(
+      context,
+      AppRoutes.createLiveTopicScreen,
+      arguments: {
+        'cohostUserId': _otherUserId,
+        'cohostName': _otherName,
+        'matchId': _matchId,
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isOnline = _isOtherUserOnline;
@@ -735,6 +748,44 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
                                               ),
                                             ],
                                           ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    GestureDetector(
+                                      onTap: _startLiveTopic,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 7,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.surfaceGlass,
+                                          borderRadius: BorderRadius.circular(
+                                            20.0,
+                                          ),
+                                          border: Border.all(
+                                            color: AppTheme.borderGlass,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.forum_rounded,
+                                              color: AppTheme.primary,
+                                              size: 17,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              'Live',
+                                              style: GoogleFonts.dmSans(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),

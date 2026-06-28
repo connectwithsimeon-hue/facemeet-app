@@ -765,6 +765,123 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map? ?? const {});
   }
 
+  // ============================================================
+  // LIVE TOPICS
+  // ============================================================
+
+  Future<Map<String, dynamic>> createLiveTopicFromConnection({
+    required String cohostUserId,
+    required String title,
+    required String topic,
+    String? description,
+    String visibility = 'link_only',
+  }) async {
+    final response = await client.rpc(
+      'create_live_topic_from_connection',
+      params: {
+        'p_cohost_user_id': cohostUserId,
+        'p_title': title,
+        'p_topic': topic,
+        'p_description': description,
+        'p_visibility': visibility,
+      },
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> respondLiveTopicCohostInvite({
+    required String liveTopicId,
+    required bool accept,
+  }) async {
+    final response = await client.rpc(
+      'respond_live_topic_cohost_invite',
+      params: {'p_live_topic_id': liveTopicId, 'p_accept': accept},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> startLiveTopic(String liveTopicId) async {
+    final response = await client.rpc(
+      'start_live_topic',
+      params: {'p_live_topic_id': liveTopicId},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> extendLiveTopic(String liveTopicId) async {
+    final response = await client.rpc(
+      'extend_live_topic',
+      params: {'p_live_topic_id': liveTopicId},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> endLiveTopic(String liveTopicId) async {
+    final response = await client.rpc(
+      'end_live_topic',
+      params: {'p_live_topic_id': liveTopicId},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> requestToJoinLiveTopic({
+    required String liveTopicId,
+    String? message,
+  }) async {
+    final response = await client.rpc(
+      'request_to_join_live_topic',
+      params: {'p_live_topic_id': liveTopicId, 'p_message': message},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> decideLiveTopicJoinRequest({
+    required String requestId,
+    required bool approve,
+  }) async {
+    final response = await client.rpc(
+      'decide_live_topic_join_request',
+      params: {'p_request_id': requestId, 'p_approve': approve},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>?> getLiveTopicBySlug(String slug) async {
+    final response = await client.rpc(
+      'get_live_topic_by_slug',
+      params: {'p_slug': slug},
+    );
+    if (response is List) {
+      if (response.isEmpty) return null;
+      return Map<String, dynamic>.from(response.first as Map);
+    }
+    if (response == null) return null;
+    return Map<String, dynamic>.from(response as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> listMyLiveTopics() async {
+    final response = await client.rpc('list_my_live_topics');
+    return List<Map<String, dynamic>>.from(response as List? ?? const []);
+  }
+
+  Future<List<Map<String, dynamic>>> listLiveTopicJoinRequests(
+    String liveTopicId,
+  ) async {
+    final response = await client.rpc(
+      'list_live_topic_join_requests',
+      params: {'p_live_topic_id': liveTopicId},
+    );
+    return List<Map<String, dynamic>>.from(response as List? ?? const []);
+  }
+
+  Map<String, dynamic> _singleRpcMap(Object? response) {
+    if (response is List) {
+      if (response.isEmpty) return const {};
+      return Map<String, dynamic>.from(response.first as Map);
+    }
+    return Map<String, dynamic>.from(response as Map? ?? const {});
+  }
+
   Future<bool> hasChatUnlockedMatch() async {
     final uid = currentUserId;
     if (uid == null) return false;
