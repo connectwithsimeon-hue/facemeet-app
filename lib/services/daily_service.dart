@@ -134,6 +134,41 @@ class LiveTopicDailyAccessResult {
   }
 }
 
+class LiveTopicHlsControlResult {
+  final String liveTopicId;
+  final String hlsStatus;
+  final String hlsPlaybackUrl;
+  final bool playbackUrlAvailable;
+
+  const LiveTopicHlsControlResult({
+    required this.liveTopicId,
+    required this.hlsStatus,
+    required this.hlsPlaybackUrl,
+    required this.playbackUrlAvailable,
+  });
+
+  factory LiveTopicHlsControlResult.fromMap(Map<String, dynamic> data) {
+    final liveTopicId = (data['live_topic_id'] as String? ?? '').trim();
+    final hlsStatus = (data['hls_status'] as String? ?? '').trim();
+    final hlsPlaybackUrl = (data['hls_playback_url'] as String? ?? '').trim();
+
+    if (liveTopicId.isEmpty || hlsStatus.isEmpty) {
+      throw DailyAccessException(
+        message: 'Live playback is unavailable',
+        code: 'malformed_live_topic_hls_response',
+      );
+    }
+
+    return LiveTopicHlsControlResult(
+      liveTopicId: liveTopicId,
+      hlsStatus: hlsStatus,
+      hlsPlaybackUrl: hlsPlaybackUrl,
+      playbackUrlAvailable:
+          data['playback_url_available'] == true || hlsPlaybackUrl.isNotEmpty,
+    );
+  }
+}
+
 class DailyService {
   static DailyService? _instance;
   static DailyService get instance => _instance ??= DailyService._();
@@ -298,6 +333,54 @@ class DailyService {
     } catch (error) {
       final message = _safeLiveTopicErrorMessage(error);
       debugPrint('LIVE TOPIC DAILY ACCESS: request failed — $message');
+      throw Exception(message);
+    }
+  }
+
+  Future<LiveTopicHlsControlResult> controlLiveTopicHls({
+    required String liveTopicId,
+    required String action,
+  }) async {
+    final safeLiveTopicId = liveTopicId.trim();
+    final safeAction = action.trim().toLowerCase();
+    if (safeLiveTopicId.isEmpty) throw Exception('invalid live topic');
+    if (!{'start', 'stop', 'status'}.contains(safeAction)) {
+      throw Exception('invalid HLS action');
+    }
+
+    try {
+      debugPrint(
+        'LIVE TOPIC HLS: invoking live_topic_hls_control action=$safeAction for liveTopicId=$safeLiveTopicId',
+      );
+      final response = await SupabaseService.instance.client.functions.invoke(
+        'live_topic_hls_control',
+        body: {'live_topic_id': safeLiveTopicId, 'action': safeAction},
+      );
+
+      final data = response.data;
+      if (data is Map && data['error'] != null) {
+        throw DailyAccessException(
+          message: data['error'].toString(),
+          code: data['error_code']?.toString() ?? 'live_topic_hls_failed',
+        );
+      }
+      if (data is! Map) {
+        throw DailyAccessException(
+          message: 'Live playback is unavailable',
+          code: 'malformed_live_topic_hls_response',
+        );
+      }
+
+      final parsed = LiveTopicHlsControlResult.fromMap(
+        Map<String, dynamic>.from(data),
+      );
+      debugPrint(
+        'LIVE TOPIC HLS: action=$safeAction status=${parsed.hlsStatus}, playback_available=${parsed.playbackUrlAvailable}',
+      );
+      return parsed;
+    } catch (error) {
+      final message = _safeLiveTopicErrorMessage(error);
+      debugPrint('LIVE TOPIC HLS: action=$safeAction failed — $message');
       throw Exception(message);
     }
   }

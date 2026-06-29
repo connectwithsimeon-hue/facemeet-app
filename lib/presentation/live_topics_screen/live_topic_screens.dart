@@ -292,6 +292,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   bool _isMuted = false;
   bool _isCameraOff = false;
   bool _isLoadingAudienceAccess = false;
+  bool _isStartingHls = false;
   Map<String, dynamic>? _audienceAccess;
 
   @override
@@ -461,9 +462,29 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     }
   }
 
+  Future<void> _startRoom(String liveTopicId) async {
+    setState(() => _isBusy = true);
+    try {
+      final updated = await SupabaseService.instance.startLiveTopic(
+        liveTopicId,
+      );
+      if (!mounted) return;
+      setState(() => _liveTopic = updated);
+      await _load(silent: true);
+      await _startHlsPlayback(force: true);
+    } catch (error) {
+      debugPrint('LIVE TOPIC: start failed — $error');
+      await _load(silent: true);
+      _showSnack(_friendlyLiveTopicError(error));
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
   Future<void> _endRoom(String liveTopicId, {bool autoEnded = false}) async {
     setState(() => _isBusy = true);
     try {
+      await _stopHlsPlayback();
       final updated = await SupabaseService.instance.endLiveTopic(liveTopicId);
       await _leaveDailyCall();
       if (mounted) {
@@ -550,6 +571,9 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
         _dailyAccessError = null;
         _isLoadingDailyAccess = false;
       });
+      if (_isHostOrCohost) {
+        unawaited(_startHlsPlayback(force: true));
+      }
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: access failed — $error');
       if (!mounted) return;
@@ -557,6 +581,78 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
         _dailyAccessError = _friendlyDailyAccessError(error);
         _isLoadingDailyAccess = false;
       });
+    }
+  }
+
+  Future<void> _startHlsPlayback({bool force = false}) async {
+    final topic = _liveTopic;
+    final id = topic?['id']?.toString() ?? '';
+    final status = topic?['status']?.toString();
+    final hlsStatus = topic?['hls_status']?.toString();
+    if (id.isEmpty ||
+        !_isHostOrCohost ||
+        status != 'live' ||
+        _isStartingHls ||
+        hlsStatus == 'live' ||
+        (hlsStatus == 'pending' && !force)) {
+      return;
+    }
+
+    _isStartingHls = true;
+    try {
+      final result = await DailyService.instance.controlLiveTopicHls(
+        liveTopicId: id,
+        action: 'start',
+      );
+      if (!mounted) return;
+      setState(() {
+        _liveTopic = {
+          ...?_liveTopic,
+          'hls_status': result.hlsStatus,
+          'hls_playback_url': result.hlsPlaybackUrl,
+        };
+      });
+      await _load(silent: true);
+      if (!result.playbackUrlAvailable) {
+        _showSnack('Live playback is starting...');
+      }
+    } catch (error) {
+      debugPrint('LIVE TOPIC HLS: start failed safely — $error');
+      if (mounted) _showSnack('Live playback could not start yet.');
+    } finally {
+      _isStartingHls = false;
+    }
+  }
+
+  Future<void> _stopHlsPlayback() async {
+    final topic = _liveTopic;
+    final id = topic?['id']?.toString() ?? '';
+    final status = topic?['status']?.toString();
+    final hlsStatus = topic?['hls_status']?.toString();
+    if (id.isEmpty ||
+        !_isHostOrCohost ||
+        status != 'live' ||
+        (hlsStatus != 'live' &&
+            hlsStatus != 'pending' &&
+            hlsStatus != 'failed')) {
+      return;
+    }
+
+    try {
+      final result = await DailyService.instance.controlLiveTopicHls(
+        liveTopicId: id,
+        action: 'stop',
+      );
+      if (!mounted) return;
+      setState(() {
+        _liveTopic = {
+          ...?_liveTopic,
+          'hls_status': result.hlsStatus,
+          'hls_playback_url': result.hlsPlaybackUrl,
+        };
+      });
+    } catch (error) {
+      debugPrint('LIVE TOPIC HLS: stop failed safely — $error');
     }
   }
 
@@ -1124,11 +1220,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
           _ActionButton(
             label: 'Start 15-minute Room',
             icon: Icons.play_arrow_rounded,
-            onPressed: _isBusy
-                ? null
-                : () => _runAction(
-                    () => SupabaseService.instance.startLiveTopic(id),
-                  ),
+            onPressed: _isBusy ? null : () => _startRoom(id),
           ),
         if (status == 'live') ...[
           _ActionButton(

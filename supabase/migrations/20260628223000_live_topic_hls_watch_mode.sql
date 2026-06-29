@@ -547,6 +547,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.get_live_topic_by_slug(TEXT);
 CREATE OR REPLACE FUNCTION public.get_live_topic_by_slug(p_slug TEXT)
 RETURNS TABLE (
   id UUID,
@@ -659,6 +660,7 @@ AS $$
     );
 $$;
 
+DROP FUNCTION IF EXISTS public.list_live_topic_join_requests(UUID);
 CREATE OR REPLACE FUNCTION public.list_live_topic_join_requests(p_live_topic_id UUID)
 RETURNS TABLE (
   id UUID,
