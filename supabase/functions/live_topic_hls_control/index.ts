@@ -24,6 +24,19 @@ type LiveTopicRow = {
   hls_ended_at: string | null;
 };
 
+type HlsErrorDiagnostics = {
+  error_code: string;
+  error_message?: string;
+  daily_status?: number;
+  daily_response_keys?: string[];
+  rtmp_url_usable?: boolean;
+  playback_url_usable?: boolean;
+};
+
+type SafeHlsError = Error & {
+  hlsDiagnostics?: HlsErrorDiagnostics;
+};
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -80,18 +93,29 @@ function safeDailyMessage(bodyText: string) {
 }
 
 function safeErrorCode(error: unknown) {
+  const details = (error as SafeHlsError | undefined)?.hlsDiagnostics;
+  if (details?.error_code) return details.error_code;
+
   const raw = error instanceof Error ? error.message : String(error ?? "");
   const knownCodes = [
     "authentication_required",
+    "missing_live_topic_id",
     "invalid_live_topic",
     "invalid_action",
     "live_topic_not_found",
     "not_host_or_cohost",
+    "unauthorized_user",
     "topic_not_live",
     "topic_ended",
     "daily_room_missing",
+    "missing_daily_room_name",
     "daily_hls_output_not_configured",
+    "invalid_rtmp_config",
+    "invalid_playback_config",
     "daily_hls_output_invalid",
+    "daily_start_failed",
+    "daily_response_unexpected",
+    "db_update_failed",
     "daily_hls_start_failed",
     "daily_hls_stop_failed",
     "daily_service_unavailable",
@@ -107,6 +131,8 @@ function safeErrorMessage(error: unknown) {
   switch (code) {
     case "authentication_required":
       return "Authentication required.";
+    case "missing_live_topic_id":
+      return "Missing Live Topic.";
     case "invalid_live_topic":
       return "Invalid Live Topic.";
     case "invalid_action":
@@ -114,17 +140,26 @@ function safeErrorMessage(error: unknown) {
     case "live_topic_not_found":
       return "Live Topic not found.";
     case "not_host_or_cohost":
+    case "unauthorized_user":
       return "Only a host or co-host can control Live Topic playback.";
     case "topic_not_live":
       return "This Live Topic is not live yet.";
     case "topic_ended":
       return "This Live Topic has ended.";
     case "daily_room_missing":
+    case "missing_daily_room_name":
       return "Live Topic video room is not ready yet.";
     case "daily_hls_output_not_configured":
       return "Live playback is not configured yet.";
     case "daily_hls_output_invalid":
+    case "invalid_rtmp_config":
+    case "invalid_playback_config":
       return "Live playback is not configured correctly yet.";
+    case "daily_start_failed":
+    case "daily_response_unexpected":
+      return "Live playback could not start yet.";
+    case "db_update_failed":
+      return "Live playback state could not be saved.";
     case "daily_service_unavailable":
       return "Live playback service is unavailable.";
     default:
@@ -134,6 +169,49 @@ function safeErrorMessage(error: unknown) {
 
 function logSafe(event: string, data: Record<string, unknown>) {
   console.log(JSON.stringify({ event, ...data }));
+}
+
+function makeHlsError(
+  code: string,
+  diagnostics: Partial<HlsErrorDiagnostics> = {},
+) {
+  const error = new Error(code) as SafeHlsError;
+  error.hlsDiagnostics = {
+    error_code: code,
+    ...diagnostics,
+  };
+  return error;
+}
+
+function safeDiagnosticArray(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .map((item) => normalizeString(item))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function safeErrorDiagnostics(error: unknown): HlsErrorDiagnostics {
+  const safeError = error as SafeHlsError | undefined;
+  const details = safeError?.hlsDiagnostics ?? {};
+  const code = details.error_code || safeErrorCode(error);
+  const rawMessage = details.error_message ||
+    (error instanceof Error ? error.message : String(error ?? ""));
+
+  return {
+    error_code: code,
+    error_message: normalizeString(rawMessage).slice(0, 160) || code,
+    daily_status: typeof details.daily_status === "number"
+      ? details.daily_status
+      : undefined,
+    daily_response_keys: safeDiagnosticArray(details.daily_response_keys),
+    rtmp_url_usable: typeof details.rtmp_url_usable === "boolean"
+      ? details.rtmp_url_usable
+      : undefined,
+    playback_url_usable: typeof details.playback_url_usable === "boolean"
+      ? details.playback_url_usable
+      : undefined,
+  };
 }
 
 function extractPlaybackUrl(value: unknown): string {
@@ -335,11 +413,14 @@ async function callDailyLiveStreaming(params: {
         ? "daily_hls_start_failed"
         : "daily_hls_stop_failed",
     });
-    throw new Error(
-      params.action === "start"
-        ? `daily_hls_start_failed:${response.status}:${safeDailyMessage(bodyText)}`
-        : `daily_hls_stop_failed:${response.status}:${safeDailyMessage(bodyText)}`,
-      );
+    const code = params.action === "start"
+      ? "daily_start_failed"
+      : "daily_hls_stop_failed";
+    throw makeHlsError(code, {
+      error_message: safeDailyMessage(bodyText),
+      daily_status: response.status,
+      daily_response_keys: Object.keys(responseBody),
+    });
   }
 
   logSafe("live_topic_hls_daily_response", {
@@ -360,6 +441,60 @@ function playbackUrlFromTemplate(template: string, topic: LiveTopicRow, roomName
     .replaceAll("{live_topic_id}", encodeURIComponent(topic.id))
     .replaceAll("{room_name}", encodeURIComponent(roomName));
   return extractPlaybackUrl(value);
+}
+
+async function persistHlsError(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+  diagnostics: HlsErrorDiagnostics,
+) {
+  if (!isUuid(liveTopicId)) return;
+
+  const { error } = await adminClient
+    .from("live_topics")
+    .update({
+      hls_last_error_code: diagnostics.error_code,
+      hls_last_error_message: normalizeString(diagnostics.error_message).slice(0, 160) ||
+        diagnostics.error_code,
+      hls_last_error_at: new Date().toISOString(),
+      hls_last_daily_status: typeof diagnostics.daily_status === "number"
+        ? diagnostics.daily_status
+        : null,
+      hls_last_daily_response_keys: diagnostics.daily_response_keys ?? [],
+    })
+    .eq("id", liveTopicId);
+
+  if (error) {
+    logSafe("live_topic_hls_error_persist_failed", {
+      live_topic_id: liveTopicId,
+      error_code: "db_update_failed",
+    });
+  }
+}
+
+async function clearHlsError(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+) {
+  if (!isUuid(liveTopicId)) return;
+
+  const { error } = await adminClient
+    .from("live_topics")
+    .update({
+      hls_last_error_code: null,
+      hls_last_error_message: null,
+      hls_last_error_at: null,
+      hls_last_daily_status: null,
+      hls_last_daily_response_keys: null,
+    })
+    .eq("id", liveTopicId);
+
+  if (error) {
+    logSafe("live_topic_hls_error_clear_failed", {
+      live_topic_id: liveTopicId,
+      error_code: "db_update_failed",
+    });
+  }
 }
 
 async function updateTopicHls(
@@ -421,7 +556,8 @@ serve(async (req) => {
     const liveTopicId = normalizeString(body?.live_topic_id);
     const action = normalizeString(body?.action).toLowerCase();
 
-    if (!isUuid(liveTopicId)) throw new Error("invalid_live_topic");
+    if (!liveTopicId) throw makeHlsError("missing_live_topic_id");
+    if (!isUuid(liveTopicId)) throw makeHlsError("invalid_live_topic");
     if (!["start", "stop", "status"].includes(action)) {
       throw new Error("invalid_action");
     }
@@ -438,7 +574,11 @@ serve(async (req) => {
       room_url_present: Boolean(topic.daily_room_url),
       hls_status: topic.hls_status ?? "not_started",
     });
-    if (!isHostOrCohost) throw new Error("not_host_or_cohost");
+    if (!isHostOrCohost) {
+      const error = makeHlsError("unauthorized_user");
+      await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
+      throw error;
+    }
 
     if (action === "status") {
       return jsonResponse({
@@ -471,7 +611,14 @@ serve(async (req) => {
 
     if (action === "start") {
       const roomAccess = await ensureDailyRoom({ adminClient, dailyApiKey, topic });
-      const roomName = resolveRoomName(roomAccess.topic);
+      let roomName = "";
+      try {
+        roomName = resolveRoomName(roomAccess.topic);
+      } catch {
+        const error = makeHlsError("missing_daily_room_name");
+        await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
+        throw error;
+      }
       if (!rtmpUrl || !playbackUrlTemplate) {
         logSafe("live_topic_hls_missing_output_config", {
           action,
@@ -485,7 +632,12 @@ serve(async (req) => {
           hls_status: "failed",
           hls_ended_at: null,
         });
-        throw new Error("daily_hls_output_not_configured");
+        const error = makeHlsError("daily_hls_output_not_configured", {
+          rtmp_url_usable: Boolean(rtmpUrl),
+          playback_url_usable: Boolean(playbackUrlTemplate),
+        });
+        await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
+        throw error;
       }
       const rtmpUrlUsable = rtmpUrlLooksUsable(rtmpUrl);
       const playbackUrlUsable = playbackUrlLooksUsable(playbackUrlTemplate);
@@ -504,7 +656,15 @@ serve(async (req) => {
           hls_status: "failed",
           hls_ended_at: null,
         });
-        throw new Error("daily_hls_output_invalid");
+        const error = makeHlsError(
+          !rtmpUrlUsable ? "invalid_rtmp_config" : "invalid_playback_config",
+          {
+            rtmp_url_usable: rtmpUrlUsable,
+            playback_url_usable: playbackUrlUsable,
+          },
+        );
+        await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
+        throw error;
       }
       if (
         roomAccess.topic.hls_status === "live" &&
@@ -543,12 +703,21 @@ serve(async (req) => {
         });
         const playbackUrl = extractPlaybackUrl(dailyBody) ||
           playbackUrlFromTemplate(playbackUrlTemplate, roomAccess.topic, roomName);
+        if (!playbackUrl) {
+          throw makeHlsError("daily_response_unexpected", {
+            error_message: "Daily accepted start but no configured playback URL was usable.",
+            daily_response_keys: Object.keys(dailyBody),
+            rtmp_url_usable: true,
+            playback_url_usable: false,
+          });
+        }
         const updated = await updateTopicHls(adminClient, liveTopicId, {
-          hls_status: playbackUrl ? "live" : "pending",
-          hls_playback_url: playbackUrl || null,
+          hls_status: "live",
+          hls_playback_url: playbackUrl,
           hls_started_at: new Date().toISOString(),
           hls_ended_at: null,
         });
+        await clearHlsError(adminClient, liveTopicId);
         return jsonResponse({
           success: true,
           live_topic_id: updated.id,
@@ -557,10 +726,12 @@ serve(async (req) => {
           playback_url_available: Boolean(playbackUrl),
         });
       } catch (error) {
+        const diagnostics = safeErrorDiagnostics(error);
         await updateTopicHls(adminClient, liveTopicId, {
           hls_status: "failed",
           hls_ended_at: null,
         });
+        await persistHlsError(adminClient, liveTopicId, diagnostics);
         throw error;
       }
     }
@@ -607,9 +778,16 @@ serve(async (req) => {
       stopped: true,
     });
   } catch (error) {
+    const diagnostics = safeErrorDiagnostics(error);
     return jsonResponse({
-      error: safeErrorMessage(error),
-      error_code: safeErrorCode(error),
+      ok: false,
+      error: diagnostics.error_code,
+      error_code: diagnostics.error_code,
+      message: safeErrorMessage(error),
+      rtmp_url_usable: diagnostics.rtmp_url_usable,
+      playback_url_usable: diagnostics.playback_url_usable,
+      daily_status: diagnostics.daily_status,
+      daily_response_keys: diagnostics.daily_response_keys,
     }, 400);
   }
 });
