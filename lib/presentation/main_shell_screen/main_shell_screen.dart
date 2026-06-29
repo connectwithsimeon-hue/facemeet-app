@@ -37,7 +37,8 @@ class MainShellScreen extends StatefulWidget {
   State<MainShellScreen> createState() => MainShellScreenState();
 }
 
-class MainShellScreenState extends State<MainShellScreen> {
+class MainShellScreenState extends State<MainShellScreen>
+    with WidgetsBindingObserver {
   static String? _aboutMeReminderShownForUserId;
 
   late int _currentIndex;
@@ -72,6 +73,7 @@ class MainShellScreenState extends State<MainShellScreen> {
 
   // Auto-reconnect timer
   Timer? _reconnectTimer;
+  Timer? _liveTopicInviteTimer;
   bool _matchesChannelActive = false;
 
   // Pending matches badge count (Sessions tab)
@@ -90,16 +92,20 @@ class MainShellScreenState extends State<MainShellScreen> {
   // Active banner overlay entries (stack so multiple can queue)
   final List<OverlayEntry> _bannerEntries = [];
   final Set<String> _handledRepeatSparkSessionIds = <String>{};
+  final Map<String, DateTime> _liveTopicInviteLastShownAt =
+      <String, DateTime>{};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentIndex = widget.initialIndex;
     _subscribeToNewMatches();
     _subscribeToRepeatSparkSessionInvites();
     _loadPendingMatchCount();
     _subscribeToPendingMatchCount();
     _startReconnectWatcher();
+    _startLiveTopicInviteWatcher();
     _initNotificationService();
     _loadChatUnreadCount();
     _externalReturnRepairSubscription = ExternalReturnRepairService.events
@@ -123,6 +129,13 @@ class MainShellScreenState extends State<MainShellScreen> {
     Future.delayed(const Duration(milliseconds: 450), () {
       _triggerVideoRepair('main-shell-init-delay');
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkPendingLiveTopicInvite());
+    }
   }
 
   void _triggerVideoRepair(String source) {
@@ -293,6 +306,73 @@ class MainShellScreenState extends State<MainShellScreen> {
     });
   }
 
+  void _startLiveTopicInviteWatcher() {
+    unawaited(_checkPendingLiveTopicInvite());
+    _liveTopicInviteTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_checkPendingLiveTopicInvite());
+    });
+  }
+
+  Future<void> _checkPendingLiveTopicInvite() async {
+    if (!mounted) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    try {
+      final uid = SupabaseService.instance.currentUserId;
+      if (uid == null) return;
+      final topics = await SupabaseService.instance.listMyLiveTopics();
+      final pending = topics.where((topic) {
+        return topic['cohost_user_id'] == uid &&
+            topic['status']?.toString() == 'pending_cohost_acceptance';
+      }).toList();
+      if (pending.isEmpty) return;
+      pending.sort((a, b) {
+        final aCreated = DateTime.tryParse(a['created_at']?.toString() ?? '');
+        final bCreated = DateTime.tryParse(b['created_at']?.toString() ?? '');
+        return (bCreated ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(
+          aCreated ?? DateTime.fromMillisecondsSinceEpoch(0),
+        );
+      });
+      final topic = pending.first;
+      final id = topic['id']?.toString() ?? '';
+      if (id.isEmpty) return;
+      final lastShown = _liveTopicInviteLastShownAt[id];
+      if (lastShown != null &&
+          DateTime.now().difference(lastShown) < const Duration(minutes: 2)) {
+        return;
+      }
+      _liveTopicInviteLastShownAt[id] = DateTime.now();
+      final title = topic['title']?.toString().trim();
+      _showBanner(
+        title: 'Live Topic Invite',
+        message: title != null && title.isNotEmpty
+            ? 'View invite: "$title"'
+            : 'View your co-host invite.',
+        icon: Icons.forum_rounded,
+        accentColor: AppTheme.primary,
+        duration: const Duration(seconds: 12),
+        onTap: () => openLiveTopicInvite(liveTopic: topic),
+      );
+    } catch (e) {
+      debugPrint('LIVE TOPIC INVITE WATCHER: skipped — $e');
+    }
+  }
+
+  void openLiveTopicInvite({
+    Map<String, dynamic>? liveTopic,
+    String? liveTopicId,
+    String? slug,
+  }) {
+    Navigator.of(context).pushNamed(
+      AppRoutes.liveTopicDetailScreen,
+      arguments: {
+        if (liveTopic != null) 'liveTopic': liveTopic,
+        if (liveTopicId != null && liveTopicId.trim().isNotEmpty)
+          'liveTopicId': liveTopicId.trim(),
+        if (slug != null && slug.trim().isNotEmpty) 'slug': slug.trim(),
+      },
+    );
+  }
+
   // ── Notification service ────────────────────────────────────────────────────
   void _initNotificationService() {
     RealtimeNotificationService.instance.initialize();
@@ -392,6 +472,7 @@ class MainShellScreenState extends State<MainShellScreen> {
     required IconData icon,
     required Color accentColor,
     VoidCallback? onTap,
+    Duration duration = const Duration(seconds: 4),
   }) {
     final overlay = Navigator.of(context, rootNavigator: true).overlay;
     if (overlay == null) return;
@@ -405,6 +486,7 @@ class MainShellScreenState extends State<MainShellScreen> {
         icon: icon,
         accentColor: accentColor,
         onTap: onTap,
+        duration: duration,
         onDismiss: () {
           entry.remove();
           _bannerEntries.remove(entry);
@@ -835,7 +917,9 @@ class MainShellScreenState extends State<MainShellScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
+    _liveTopicInviteTimer?.cancel();
     _matchesChannel?.unsubscribe();
     _pendingMatchesChannel?.unsubscribe();
     _repeatSparkSessionsChannel?.unsubscribe();

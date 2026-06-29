@@ -547,10 +547,26 @@ class PushNotificationService {
   }
 
   Future<void> _routeFromData(Map<String, dynamic> data) async {
-    final type = data['type'] as String?;
-    final navigator = pushNotificationNavigatorKey?.currentState;
+    final type = data['type']?.toString().trim().toLowerCase().replaceAll(
+      '-',
+      '_',
+    );
+    NavigatorState? navigator;
+    for (var attempt = 0; attempt < 10; attempt++) {
+      navigator = pushNotificationNavigatorKey?.currentState;
+      if (navigator != null) break;
+      await Future.delayed(const Duration(milliseconds: 350));
+    }
 
-    if (navigator == null) return;
+    if (navigator == null) {
+      _log('PUSH: navigation skipped — navigator not ready for type=$type');
+      return;
+    }
+
+    if (_isLiveTopicNotificationType(type)) {
+      _routeToLiveTopicInvite(navigator, data);
+      return;
+    }
 
     switch (type) {
       case 'new_match':
@@ -689,21 +705,6 @@ class PushNotificationService {
           }
         }
         break;
-      case 'live_topic_invite':
-        final slug = data['live_topic_slug']?.toString().trim();
-        final liveTopicId = data['live_topic_id']?.toString().trim();
-        _log(
-          'LIVE TOPIC: invite notification tapped — slugPresent=${slug != null && slug.isNotEmpty}, idPresent=${liveTopicId != null && liveTopicId.isNotEmpty}',
-        );
-        navigator.pushNamed(
-          AppRoutes.liveTopicDetailScreen,
-          arguments: {
-            if (slug != null && slug.isNotEmpty) 'slug': slug,
-            if (liveTopicId != null && liveTopicId.isNotEmpty)
-              'liveTopicId': liveTopicId,
-          },
-        );
-        break;
       default:
         if (_isSparkScheduleNotificationType(type)) {
           final shell = mainShellKey.currentState;
@@ -734,6 +735,36 @@ class PushNotificationService {
           _log('PUSH: Unknown notification type — $type');
         }
     }
+  }
+
+  void _routeToLiveTopicInvite(
+    NavigatorState navigator,
+    Map<String, dynamic> data,
+  ) {
+    final slug = data['live_topic_slug']?.toString().trim();
+    final liveTopicId = data['live_topic_id']?.toString().trim();
+    final title = data['topic_title']?.toString().trim();
+    _log(
+      'LIVE TOPIC: notification tapped — slugPresent=${slug != null && slug.isNotEmpty}, idPresent=${liveTopicId != null && liveTopicId.isNotEmpty}',
+    );
+    navigator.pushNamed(
+      AppRoutes.liveTopicDetailScreen,
+      arguments: {
+        if (slug != null && slug.isNotEmpty) 'slug': slug,
+        if (liveTopicId != null && liveTopicId.isNotEmpty)
+          'liveTopicId': liveTopicId,
+        if (title != null && title.isNotEmpty) 'topicTitle': title,
+      },
+    );
+  }
+
+  bool _isLiveTopicNotificationType(String? type) {
+    final normalized = type?.trim().toLowerCase().replaceAll('-', '_');
+    return normalized == 'live_topic_invite' ||
+        normalized == 'live_topic_status' ||
+        normalized == 'live_topic_ready' ||
+        normalized == 'live_topic_started' ||
+        normalized == 'live_topic_ended';
   }
 
   bool _isEventNotificationType(String? type) {

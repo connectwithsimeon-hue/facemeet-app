@@ -259,8 +259,14 @@ class _CreateLiveTopicScreenState extends State<CreateLiveTopicScreen> {
 class LiveTopicDetailScreen extends StatefulWidget {
   final Map<String, dynamic>? initialLiveTopic;
   final String? slug;
+  final String? liveTopicId;
 
-  const LiveTopicDetailScreen({super.key, this.initialLiveTopic, this.slug});
+  const LiveTopicDetailScreen({
+    super.key,
+    this.initialLiveTopic,
+    this.slug,
+    this.liveTopicId,
+  });
 
   @override
   State<LiveTopicDetailScreen> createState() => _LiveTopicDetailScreenState();
@@ -335,6 +341,11 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
           : _liveTopic?['public_slug']?.toString().trim();
       if (slug != null && slug.isNotEmpty) {
         topic = await SupabaseService.instance.getLiveTopicBySlug(slug);
+      } else {
+        final liveTopicId = widget.liveTopicId?.trim();
+        if (liveTopicId != null && liveTopicId.isNotEmpty) {
+          topic = await SupabaseService.instance.getLiveTopicById(liveTopicId);
+        }
       }
       if (topic != null) {
         final requests = await SupabaseService.instance
@@ -586,6 +597,23 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   }
 
   Future<void> _leaveRoom() async {
+    final topic = _liveTopic;
+    final id = topic?['id']?.toString() ?? '';
+    final status = topic?['status']?.toString();
+    final uid = SupabaseService.instance.currentUserId;
+    final isCreator = uid != null && topic?['creator_user_id'] == uid;
+    final shouldEndForEveryone =
+        id.isNotEmpty &&
+        _isHostOrCohost &&
+        (status == 'live' ||
+            status == 'ready' ||
+            (status == 'pending_cohost_acceptance' && isCreator));
+
+    if (shouldEndForEveryone) {
+      await _endRoom(id);
+      return;
+    }
+
     await _leaveDailyCall();
     if (mounted) Navigator.pop(context);
   }
@@ -623,12 +651,21 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     if (text.contains('not_host_or_cohost')) {
       return 'Only a host or co-host can do that.';
     }
+    if (text.contains('host_insufficient_sparks')) {
+      return 'Your co-host needs 1 Spark to extend this Live Topic.';
+    }
+    if (text.contains('cohost_insufficient_sparks')) {
+      return 'Your co-host needs 1 Spark to extend this Live Topic.';
+    }
+    if (text.contains('extension_requires_both_sparks')) {
+      return 'Both hosts need 1 Spark to extend this Live Topic.';
+    }
     if (text.contains('insufficient_sparks') ||
         text.contains('not_enough_sparks')) {
       if (text.contains('cohost')) {
         return 'You need 1 Spark to accept this co-host invite.';
       }
-      return 'You need 1 Spark to continue this Live Topic.';
+      return 'You need 1 Spark to extend this Live Topic.';
     }
     if (text.contains('cohost_not_accepted')) {
       return 'Your co-host must accept before the room can start.';
@@ -890,12 +927,16 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
           ),
         if (status == 'live') ...[
           _ActionButton(
-            label: 'Extend 15 min for 1 Spark',
+            label: 'Extend 15 min - 1 Spark each',
             icon: Icons.bolt_rounded,
             onPressed: _isBusy
                 ? null
                 : () => _runAction(
-                    () => SupabaseService.instance.extendLiveTopic(id),
+                    () => SupabaseService.instance.extendLiveTopic(
+                      id,
+                      extensionKey:
+                          '${DateTime.now().microsecondsSinceEpoch}-$id',
+                    ),
                   ),
           ),
           const SizedBox(height: 10),

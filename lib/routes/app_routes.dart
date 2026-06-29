@@ -104,6 +104,7 @@ class AppRoutes {
       final args = ModalRoute.of(context)?.settings.arguments;
       Map<String, dynamic>? liveTopic;
       String? slug;
+      String? liveTopicId;
       if (args is Map<String, dynamic>) {
         final topicArg = args['liveTopic'];
         if (topicArg is Map<String, dynamic>) {
@@ -112,8 +113,13 @@ class AppRoutes {
           liveTopic = Map<String, dynamic>.from(topicArg);
         }
         slug = args['slug']?.toString();
+        liveTopicId = args['liveTopicId']?.toString();
       }
-      return LiveTopicDetailScreen(initialLiveTopic: liveTopic, slug: slug);
+      return LiveTopicDetailScreen(
+        initialLiveTopic: liveTopic,
+        slug: slug,
+        liveTopicId: liveTopicId,
+      );
     },
   };
 

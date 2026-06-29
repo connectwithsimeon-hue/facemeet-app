@@ -882,10 +882,17 @@ class SupabaseService {
     return _singleRpcMap(response);
   }
 
-  Future<Map<String, dynamic>> extendLiveTopic(String liveTopicId) async {
+  Future<Map<String, dynamic>> extendLiveTopic(
+    String liveTopicId, {
+    String? extensionKey,
+  }) async {
     final response = await client.rpc(
       'extend_live_topic',
-      params: {'p_live_topic_id': liveTopicId},
+      params: {
+        'p_live_topic_id': liveTopicId,
+        if (extensionKey != null && extensionKey.trim().isNotEmpty)
+          'p_extension_key': extensionKey.trim(),
+      },
     );
     return _singleRpcMap(response);
   }
@@ -931,6 +938,18 @@ class SupabaseService {
     }
     if (response == null) return null;
     return Map<String, dynamic>.from(response as Map);
+  }
+
+  Future<Map<String, dynamic>?> getLiveTopicById(String liveTopicId) async {
+    final id = liveTopicId.trim();
+    if (id.isEmpty) return null;
+    final response = await client
+        .from('live_topics')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
+    if (response == null) return null;
+    return Map<String, dynamic>.from(response);
   }
 
   Future<List<Map<String, dynamic>>> listMyLiveTopics() async {
