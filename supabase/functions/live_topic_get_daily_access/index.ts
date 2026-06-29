@@ -7,7 +7,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const MAX_PARTICIPANTS = 2;
+const MAX_PARTICIPANTS = 4;
 const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 
 type LiveTopicRow = {
@@ -19,6 +19,7 @@ type LiveTopicRow = {
   daily_room_name: string | null;
   started_at: string | null;
   ends_at: string | null;
+  max_speakers: number | null;
 };
 
 type UserRow = {
@@ -127,7 +128,7 @@ function safeErrorMessage(error: unknown) {
   if (text.includes("invalid_live_topic")) return "invalid live topic";
   if (text.includes("live_topic_not_found")) return "Live Topic not found.";
   if (text.includes("daily_access_denied")) {
-    return "You can only join this Live Topic as a host or co-host.";
+    return "You can only join this Live Topic video stage as a host, co-host, or approved speaker.";
   }
   if (text.includes("room_not_live")) {
     return "This Live Topic has not started yet.";
@@ -174,7 +175,7 @@ async function fetchLiveTopic(
   const { data, error } = await adminClient
     .from("live_topics")
     .select(
-      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at",
+      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers",
     )
     .eq("id", liveTopicId)
     .maybeSingle();
@@ -182,6 +183,34 @@ async function fetchLiveTopic(
   if (error) throw new Error("live_topic_lookup_failed");
   if (!data) throw new Error("live_topic_not_found");
   return data as LiveTopicRow;
+}
+
+async function fetchPaidStageSpeaker(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+  userId: string,
+) {
+  const { data, error } = await adminClient
+    .from("live_topic_participants")
+    .select("id,role,status")
+    .eq("live_topic_id", liveTopicId)
+    .eq("user_id", userId)
+    .eq("role", "speaker")
+    .eq("status", "joined")
+    .maybeSingle();
+
+  if (error) throw new Error("stage_access_lookup_failed");
+  if (!data) return false;
+
+  const { data: charge, error: chargeError } = await adminClient
+    .from("live_topic_stage_charges")
+    .select("id")
+    .eq("live_topic_id", liveTopicId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (chargeError) throw new Error("stage_charge_lookup_failed");
+  return Boolean(charge?.id);
 }
 
 async function fetchUser(
@@ -343,7 +372,7 @@ async function ensureDailyRoom(params: {
     .eq("id", params.topic.id)
     .eq("status", "live")
     .select(
-      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at",
+      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers",
     )
     .single();
 
@@ -398,7 +427,10 @@ serve(async (req) => {
     const callerUserId = authData.user.id;
     const isHostOrCohost =
       topic.creator_user_id === callerUserId || topic.cohost_user_id === callerUserId;
-    if (!isHostOrCohost) throw new Error("daily_access_denied");
+    const isPaidStageSpeaker = isHostOrCohost
+      ? false
+      : await fetchPaidStageSpeaker(adminClient, liveTopicId, callerUserId);
+    if (!isHostOrCohost && !isPaidStageSpeaker) throw new Error("daily_access_denied");
 
     if (topic.status === "ended" || topic.status === "cancelled" || topic.status === "declined") {
       throw new Error("room_ended");
@@ -421,7 +453,7 @@ serve(async (req) => {
       meeting_token: tokenResult.meetingToken,
       room_expires_at: access.roomExpiresAt,
       token_expires_at: tokenResult.tokenExpiresAt,
-      max_participants: MAX_PARTICIPANTS,
+      max_participants: Math.min(topic.max_speakers ?? MAX_PARTICIPANTS, MAX_PARTICIPANTS),
     });
   } catch (error) {
     const details = safeErrorDetails(error);

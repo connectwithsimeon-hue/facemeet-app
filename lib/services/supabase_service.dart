@@ -774,6 +774,11 @@ class SupabaseService {
     return List<Map<String, dynamic>>.from(response as List? ?? const []);
   }
 
+  Future<List<Map<String, dynamic>>> listLiveNowTopics() async {
+    final response = await client.rpc('list_live_now_topics');
+    return List<Map<String, dynamic>>.from(response as List? ?? const []);
+  }
+
   Future<bool> sendPushNotification({
     required String userId,
     required String type,
@@ -912,6 +917,27 @@ class SupabaseService {
     final response = await client.rpc(
       'request_to_join_live_topic',
       params: {'p_live_topic_id': liveTopicId, 'p_message': message},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> joinLiveTopicAudience({
+    required String liveTopicId,
+    bool pay = false,
+  }) async {
+    final response = await client.rpc(
+      'join_live_topic_audience',
+      params: {'p_live_topic_id': liveTopicId, 'p_pay': pay},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> joinLiveTopicStage({
+    required String liveTopicId,
+  }) async {
+    final response = await client.rpc(
+      'join_live_topic_stage',
+      params: {'p_live_topic_id': liveTopicId},
     );
     return _singleRpcMap(response);
   }

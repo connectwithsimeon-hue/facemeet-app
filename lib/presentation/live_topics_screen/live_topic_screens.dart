@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../routes/app_routes.dart';
@@ -290,6 +291,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   bool _wakeLockEnabled = false;
   bool _isMuted = false;
   bool _isCameraOff = false;
+  bool _isLoadingAudienceAccess = false;
+  Map<String, dynamic>? _audienceAccess;
 
   @override
   void initState() {
@@ -372,6 +375,25 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     return uid != null &&
         (_liveTopic?['creator_user_id'] == uid ||
             _liveTopic?['cohost_user_id'] == uid);
+  }
+
+  bool get _canUseDailyStage {
+    if (_isHostOrCohost) return true;
+    final stageStatus =
+        _liveTopic?['viewer_stage_status']?.toString() ??
+        _audienceAccess?['viewer_stage_status']?.toString();
+    return stageStatus == 'joined';
+  }
+
+  bool get _isApprovedUnpaidSpeaker {
+    if (_isHostOrCohost) return false;
+    final requestStatus = _liveTopic?['viewer_request_status']?.toString();
+    final stageStatus = _liveTopic?['viewer_stage_status']?.toString();
+    return requestStatus == 'approved' && stageStatus != 'joined';
+  }
+
+  bool get _hasPendingStageRequest {
+    return _liveTopic?['viewer_request_status']?.toString() == 'pending';
   }
 
   bool get _isCohostInvite {
@@ -479,7 +501,11 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       return;
     }
 
-    if (kIsWeb || !_isHostOrCohost || status != 'live') {
+    if (status == 'live' && !_isHostOrCohost) {
+      await _loadAudienceAccess(pay: false, silent: true);
+    }
+
+    if (kIsWeb || !_canUseDailyStage || status != 'live') {
       await _setLiveTopicWakeLock(false);
       return;
     }
@@ -496,7 +522,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
 
   Future<void> _loadDailyAccess({bool force = false}) async {
     final id = _liveTopic?['id']?.toString();
-    if (id == null || id.isEmpty || kIsWeb || !_isHostOrCohost) return;
+    if (id == null || id.isEmpty || kIsWeb || !_canUseDailyStage) return;
     if (_isLoadingDailyAccess) return;
     if (!force &&
         (_dailyRoomUrl?.isNotEmpty ?? false) &&
@@ -621,7 +647,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   String _friendlyDailyAccessError(Object error) {
     final text = error.toString().toLowerCase();
     if (text.contains('host or co-host')) {
-      return 'You can only join this Live Topic as a host or co-host.';
+      return 'You can only join this video stage after host approval.';
     }
     if (text.contains('not started')) {
       return 'This Live Topic has not started yet.';
@@ -647,6 +673,15 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     final text = error.toString().toLowerCase();
     if (text.contains('topic_not_open')) {
       return 'This Live Topic is no longer open.';
+    }
+    if (text.contains('stage_full') || text.contains('max_speakers_reached')) {
+      return 'This stage is full.';
+    }
+    if (text.contains('stage_request_not_approved')) {
+      return 'The host needs to approve your stage request first.';
+    }
+    if (text.contains('topic_ended')) {
+      return 'This Live Topic has ended.';
     }
     if (text.contains('not_host_or_cohost')) {
       return 'Only a host or co-host can do that.';
@@ -704,10 +739,153 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     if (id == null || id.isEmpty) return;
     setState(() => _isBusy = true);
     try {
-      await SupabaseService.instance.requestToJoinLiveTopic(liveTopicId: id);
+      final message = await _askJoinStageMessage();
+      if (!mounted) return;
+      await SupabaseService.instance.requestToJoinLiveTopic(
+        liveTopicId: id,
+        message: message,
+      );
       _showSnack('Request sent.');
+      await _load(silent: true);
     } catch (error) {
       debugPrint('LIVE TOPIC: request to join failed — $error');
+      _showSnack(_friendlyLiveTopicError(error));
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  Future<String?> _askJoinStageMessage() async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Request to Join Stage',
+                  style: GoogleFonts.dmSans(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Share what you want to add to the conversation. This request is free.',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  maxLines: 3,
+                  maxLength: 180,
+                  style: GoogleFonts.dmSans(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Optional message',
+                    hintStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                    filled: true,
+                    fillColor: AppTheme.surfaceGlass,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(color: AppTheme.borderGlass),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(color: AppTheme.borderGlass),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(color: AppTheme.primary),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _ActionButton(
+                  label: 'Send Request',
+                  icon: Icons.record_voice_over_rounded,
+                  onPressed: () {
+                    Navigator.pop(context, controller.text.trim());
+                  },
+                ),
+                const SizedBox(height: 8),
+                _SecondaryActionButton(
+                  label: 'Cancel',
+                  icon: Icons.close_rounded,
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _loadAudienceAccess({
+    required bool pay,
+    bool silent = false,
+  }) async {
+    final id = _liveTopic?['id']?.toString();
+    if (id == null || id.isEmpty || _isHostOrCohost) return;
+    if (!silent && mounted) setState(() => _isLoadingAudienceAccess = true);
+    try {
+      final access = await SupabaseService.instance.joinLiveTopicAudience(
+        liveTopicId: id,
+        pay: pay,
+      );
+      if (!mounted) return;
+      setState(() {
+        _audienceAccess = access;
+        _isLoadingAudienceAccess = false;
+      });
+      if (pay && access['access_granted'] == true) {
+        _showSnack('You can now watch this Live Topic.');
+      }
+    } catch (error) {
+      debugPrint('LIVE TOPIC: audience access failed — $error');
+      if (!mounted) return;
+      setState(() => _isLoadingAudienceAccess = false);
+      _showSnack(_friendlyLiveTopicError(error));
+    }
+  }
+
+  Future<void> _joinStage() async {
+    final id = _liveTopic?['id']?.toString();
+    if (id == null || id.isEmpty) return;
+    setState(() => _isBusy = true);
+    try {
+      await SupabaseService.instance.joinLiveTopicStage(liveTopicId: id);
+      if (mounted) {
+        setState(() {
+          _audienceAccess = {
+            ...?_audienceAccess,
+            'viewer_stage_status': 'joined',
+          };
+        });
+      }
+      _showSnack('Stage unlocked. Connecting video...');
+      await _load(silent: true);
+      await _loadDailyAccess(force: true);
+    } catch (error) {
+      debugPrint('LIVE TOPIC: join stage failed — $error');
       _showSnack(_friendlyLiveTopicError(error));
     } finally {
       if (mounted) setState(() => _isBusy = false);
@@ -767,23 +945,33 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                   _LiveRoomCard(topic: topic, timerText: _timeRemaining),
                   const SizedBox(height: 18),
                   if (status == 'live') ...[
-                    _LiveTopicVideoStage(
-                      isHostOrCohost: _isHostOrCohost,
-                      isWeb: kIsWeb,
-                      isLoading: _isLoadingDailyAccess,
-                      error: _dailyAccessError,
-                      roomUrl: _dailyRoomUrl,
-                      meetingToken: _dailyMeetingToken,
-                      dailyCallKey: _dailyCallKey,
-                      onRetry: () => _loadDailyAccess(force: true),
-                      onEnded: () => unawaited(_handleDailyCallEnded()),
-                      onRefreshDailyAccess: _refreshDailyAccess,
-                      isMuted: _isMuted,
-                      isCameraOff: _isCameraOff,
-                      onToggleMute: _toggleLiveTopicMute,
-                      onToggleCamera: _toggleLiveTopicCamera,
-                      onLeave: _leaveRoom,
-                    ),
+                    if (_canUseDailyStage)
+                      _LiveTopicVideoStage(
+                        isHostOrCohost: _isHostOrCohost,
+                        isWeb: kIsWeb,
+                        isLoading: _isLoadingDailyAccess,
+                        error: _dailyAccessError,
+                        roomUrl: _dailyRoomUrl,
+                        meetingToken: _dailyMeetingToken,
+                        dailyCallKey: _dailyCallKey,
+                        onRetry: () => _loadDailyAccess(force: true),
+                        onEnded: () => unawaited(_handleDailyCallEnded()),
+                        onRefreshDailyAccess: _refreshDailyAccess,
+                        isMuted: _isMuted,
+                        isCameraOff: _isCameraOff,
+                        onToggleMute: _toggleLiveTopicMute,
+                        onToggleCamera: _toggleLiveTopicCamera,
+                        onLeave: _leaveRoom,
+                      )
+                    else
+                      _LiveTopicAudienceCard(
+                        topic: topic,
+                        audienceAccess: _audienceAccess,
+                        isLoading: _isLoadingAudienceAccess,
+                        onPayToWatch: _isBusy
+                            ? null
+                            : () => _loadAudienceAccess(pay: true),
+                      ),
                     const SizedBox(height: 18),
                   ],
                   _InfoCard(
@@ -837,12 +1025,29 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                   ],
                   if (!isEnded && _isCohostInvite) _buildInviteActions(),
                   if (!isEnded && _isHostOrCohost) _buildHostActions(topic),
-                  if (!isEnded && !_isHostOrCohost && topic['status'] == 'live')
-                    _ActionButton(
-                      label: 'Request to Join',
-                      icon: Icons.record_voice_over_rounded,
-                      onPressed: _isBusy ? null : _requestToJoin,
-                    ),
+                  if (!isEnded &&
+                      !_isHostOrCohost &&
+                      topic['status'] == 'live') ...[
+                    if (_isApprovedUnpaidSpeaker)
+                      _ActionButton(
+                        label: 'Join Stage for 1 Spark',
+                        icon: Icons.video_call_rounded,
+                        onPressed: _isBusy ? null : _joinStage,
+                      )
+                    else if (_hasPendingStageRequest)
+                      const _VideoPlaceholderCard(
+                        icon: Icons.hourglass_top_rounded,
+                        title: 'Request sent',
+                        body:
+                            'The host or co-host can approve your request to join the stage.',
+                      )
+                    else
+                      _ActionButton(
+                        label: 'Request to Join Stage',
+                        icon: Icons.record_voice_over_rounded,
+                        onPressed: _isBusy ? null : _requestToJoin,
+                      ),
+                  ],
                   if (!isEnded &&
                       _isHostOrCohost &&
                       _joinRequests.isNotEmpty) ...[
@@ -1785,6 +1990,216 @@ class _LiveTopicCallControlButton extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LiveTopicAudienceCard extends StatelessWidget {
+  final Map<String, dynamic> topic;
+  final Map<String, dynamic>? audienceAccess;
+  final bool isLoading;
+  final VoidCallback? onPayToWatch;
+
+  const _LiveTopicAudienceCard({
+    required this.topic,
+    required this.audienceAccess,
+    required this.isLoading,
+    required this.onPayToWatch,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status = topic['status']?.toString() ?? '';
+    final hlsUrl =
+        audienceAccess?['hls_playback_url']?.toString().trim().isNotEmpty ==
+            true
+        ? audienceAccess!['hls_playback_url'].toString().trim()
+        : topic['hls_playback_url']?.toString().trim() ?? '';
+    final hlsStatus =
+        audienceAccess?['hls_status']?.toString() ??
+        topic['hls_status']?.toString() ??
+        'not_started';
+    final accessGranted =
+        audienceAccess?['access_granted'] == true ||
+        topic['viewer_access_type']?.toString().isNotEmpty == true;
+    final requiresPayment = audienceAccess?['requires_payment'] == true;
+    final freeSeats =
+        ((audienceAccess?['free_seats_remaining'] as num?)?.toInt() ??
+                (topic['free_seats_remaining'] as num?)?.toInt() ??
+                0)
+            .clamp(0, 20);
+
+    if (status != 'live') {
+      return const _VideoPlaceholderCard(
+        icon: Icons.schedule_rounded,
+        title: 'Starting soon',
+        body: 'This Live Topic will open when the hosts start the room.',
+      );
+    }
+
+    if (isLoading) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.visibility_rounded,
+        title: 'Preparing access...',
+        body: 'Checking your Live Topic watch access.',
+        showSpinner: true,
+      );
+    }
+
+    if (requiresPayment && !accessGranted) {
+      return _VideoPlaceholderCard(
+        icon: Icons.bolt_rounded,
+        title: 'This Live Topic is popular',
+        body: 'The free viewer seats are full. Watch/listen for 1 Spark.',
+        actionLabel: 'Watch for 1 Spark',
+        onAction: onPayToWatch,
+      );
+    }
+
+    if (!accessGranted) {
+      return _VideoPlaceholderCard(
+        icon: Icons.visibility_rounded,
+        title: freeSeats > 0 ? 'Free viewer seats available' : 'Watch gate',
+        body: freeSeats > 0
+            ? '$freeSeats free viewer seats remain. Open this Live Topic to claim one.'
+            : 'Watch/listen access will be available after the gate opens.',
+      );
+    }
+
+    if (hlsUrl.isNotEmpty && hlsStatus == 'live') {
+      return _HlsPlaybackCard(hlsUrl: hlsUrl);
+    }
+
+    return const _VideoPlaceholderCard(
+      icon: Icons.podcasts_rounded,
+      title: 'Live playback is being prepared',
+      body:
+          'The host and co-host are live. Watch/listen playback will appear here when HLS is available.',
+    );
+  }
+}
+
+class _HlsPlaybackCard extends StatefulWidget {
+  final String hlsUrl;
+
+  const _HlsPlaybackCard({required this.hlsUrl});
+
+  @override
+  State<_HlsPlaybackCard> createState() => _HlsPlaybackCardState();
+}
+
+class _HlsPlaybackCardState extends State<_HlsPlaybackCard> {
+  VideoPlayerController? _controller;
+  bool _isInitializing = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HlsPlaybackCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.hlsUrl != widget.hlsUrl) {
+      _controller?.dispose();
+      _controller = null;
+      _isInitializing = true;
+      _error = null;
+      _init();
+    }
+  }
+
+  Future<void> _init() async {
+    try {
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.hlsUrl),
+      );
+      _controller = controller;
+      await controller.initialize();
+      await controller.setVolume(1);
+      if (!mounted) return;
+      setState(() => _isInitializing = false);
+    } catch (error) {
+      debugPrint('LIVE TOPIC HLS: playback init failed — $error');
+      if (!mounted) return;
+      setState(() {
+        _isInitializing = false;
+        _error = 'Live playback is not available on this device yet.';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (_isInitializing) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.play_circle_rounded,
+        title: 'Loading live playback...',
+        body: 'Preparing the live conversation stream.',
+        showSpinner: true,
+      );
+    }
+
+    if (_error != null ||
+        controller == null ||
+        !controller.value.isInitialized) {
+      return _VideoPlaceholderCard(
+        icon: Icons.live_tv_rounded,
+        title: 'Playback unavailable',
+        body: _error ?? 'Live playback is not available on this device yet.',
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        height: 360,
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: controller.value.aspectRatio == 0
+                    ? 16 / 9
+                    : controller.value.aspectRatio,
+                child: VideoPlayer(controller),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: SafeArea(
+                top: false,
+                child: _ActionButton(
+                  label: controller.value.isPlaying ? 'Pause' : 'Play Live',
+                  icon: controller.value.isPlaying
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  onPressed: () async {
+                    if (controller.value.isPlaying) {
+                      await controller.pause();
+                    } else {
+                      await controller.play();
+                    }
+                    if (mounted) setState(() {});
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
