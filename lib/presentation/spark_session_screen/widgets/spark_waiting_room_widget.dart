@@ -1703,19 +1703,33 @@ class _SparkWaitingRoomWidgetState extends State<SparkWaitingRoomWidget>
                 const SizedBox(height: 48),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.timer_outlined,
-                        color: AppTheme.textMuted,
-                        size: 14,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.timer_outlined,
+                            color: AppTheme.textMuted,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '3-minute Spark Session',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(height: 6),
                       Text(
-                        '3-minute Spark Session',
+                        'When both people join, each uses 1 Spark.',
+                        textAlign: TextAlign.center,
                         style: GoogleFonts.dmSans(
-                          fontSize: 13,
+                          fontSize: 12,
                           color: AppTheme.textMuted,
                         ),
                       ),

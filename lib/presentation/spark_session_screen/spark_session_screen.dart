@@ -90,66 +90,14 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
       debugPrint('SPARK GATE: uid=$uid, spark_balance=$sparkBalance');
 
       if (sparkBalance <= 0) {
-        // Check if the OTHER user is the initiator and has sparks
-        // (so the non-initiating user can still join)
-        String? otherUserId = _matchedUserId;
-        if ((otherUserId == null || otherUserId.isEmpty) &&
-            _matchId != null &&
-            _matchId!.isNotEmpty) {
-          try {
-            final match = await SupabaseService.instance.client
-                .from('matches')
-                .select('user_1_id, user_2_id')
-                .eq('id', _matchId!)
-                .maybeSingle();
-            if (match != null) {
-              otherUserId = match['user_1_id'] == uid
-                  ? match['user_2_id'] as String?
-                  : match['user_1_id'] as String?;
-            }
-          } catch (_) {}
-        }
-
-        // Check if there's an active session for this match (meaning other user already started)
-        bool otherUserStarted = false;
-        if (_matchId != null && _matchId!.isNotEmpty) {
-          try {
-            final tenMinutesAgo = DateTime.now()
-                .subtract(const Duration(minutes: 10))
-                .toIso8601String();
-            final activeSession = await SupabaseService.instance.client
-                .from('spark_sessions')
-                .select('id, initiated_by')
-                .eq('match_id', _matchId!)
-                .not('status', 'eq', 'ended')
-                .isFilter('ended_at', null)
-                .gte('created_at', tenMinutesAgo)
-                .limit(1)
-                .maybeSingle();
-            if (activeSession != null) {
-              final initiatedBy = activeSession['initiated_by'] as String?;
-              // If the other user initiated, this user can join without sparks
-              otherUserStarted = initiatedBy != null && initiatedBy != uid;
-              debugPrint(
-                'SPARK GATE: active session found, initiated_by=$initiatedBy, otherUserStarted=$otherUserStarted',
-              );
-            }
-          } catch (_) {}
-        }
-
-        if (!otherUserStarted) {
-          debugPrint(
-            'SPARK GATE: spark_balance=$sparkBalance and no active session — blocking',
-          );
-          if (mounted) {
-            setState(() => _loadingProfile = false);
-            _showLimitBottomSheet('free');
-          }
-          return;
-        }
         debugPrint(
-          'SPARK GATE: spark_balance=$sparkBalance but other user started session — allowing join',
+          'SPARK GATE: spark_balance=$sparkBalance — blocking Spark Session entry',
         );
+        if (mounted) {
+          setState(() => _loadingProfile = false);
+          _showLimitBottomSheet('free');
+        }
+        return;
       }
     } catch (e) {
       debugPrint('SPARK GATE: Error checking feature gate: $e');
@@ -433,7 +381,7 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
           debugPrint(
             'SPARK SESSION: match already chat_unlocked — skipping decision screen, going to chat',
           );
-          _incrementSparksUsed();
+          await _incrementSparksUsed();
           if (mounted) {
             Navigator.pushNamed(
               context,
@@ -450,13 +398,12 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     // First-time session or status check failed — show decision/rating screen
     debugPrint('SPARK SESSION: first Spark Session ended — matchId=$matchId');
     debugPrint('SPARK SESSION: how-did-it-feel screen shown');
-    _incrementSparksUsed();
+    await _incrementSparksUsed();
     setState(() => _phase = SparkSessionPhase.decision);
   }
 
-  /// Deduct 1 spark from spark_balance after a completed session.
-  /// IMPORTANT: Only deducts from the session INITIATOR, not the joiner.
-  /// All tiers use spark_balance as the single source of truth.
+  /// Deduct 1 Spark from each participant after both users joined.
+  /// Uses the server RPC when available so retries/reopens do not double-charge.
   Future<void> _incrementSparksUsed() async {
     final uid = SupabaseService.instance.currentUserId;
     if (uid == null) {
@@ -467,6 +414,36 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     debugPrint(
       'SPARK DEDUCT: _incrementSparksUsed called — uid=$uid, matchId=$_matchId, sessionKey=$_sessionKey',
     );
+
+    if (_matchId != null && _matchId!.isNotEmpty) {
+      try {
+        final result = await SupabaseService.instance
+            .chargeSparkSessionParticipants(
+              matchId: _matchId!,
+              sessionKey: _sessionKey,
+            );
+        debugPrint('SPARK DEDUCT: bilateral RPC result=$result');
+        await _clearCurrentSessionKey();
+        return;
+      } catch (e) {
+        if (_isMissingBilateralChargeRpc(e)) {
+          debugPrint(
+            'SPARK DEDUCT: bilateral RPC unavailable — using legacy initiator-only fallback until migration is applied',
+          );
+        } else {
+          debugPrint('SPARK DEDUCT: bilateral RPC failed — $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(_friendlySparkChargeError(e)),
+                backgroundColor: AppTheme.error,
+              ),
+            );
+          }
+          return;
+        }
+      }
+    }
 
     // Only deduct if both users actually joined
     if (_matchId != null && _matchId!.isNotEmpty) {
@@ -630,13 +607,70 @@ class _SparkSessionScreenState extends State<SparkSessionScreen> {
     }
   }
 
-  /// Refund a spark to the initiator — called when Daily.co error occurs.
-  /// Only refunds if the current user is the initiator and a deduction was made.
+  bool _isMissingBilateralChargeRpc(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('charge_spark_session_participants') ||
+        text.contains('refund_spark_session_participants') ||
+        text.contains('pgrst202') ||
+        text.contains('could not find the function') ||
+        text.contains('function public.charge_spark_session_participants') ||
+        text.contains('function public.refund_spark_session_participants');
+  }
+
+  String _friendlySparkChargeError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('not_enough_sparks_participant')) {
+      return 'You need 1 Spark to join this Spark Session.';
+    }
+    if (text.contains('not_enough_sparks_initiator')) {
+      return 'Both people need 1 Spark for a Spark Session.';
+    }
+    if (text.contains('spark_session_not_fully_joined')) {
+      return 'Sparks are only used after both people join the video intro.';
+    }
+    return 'Could not use Sparks for this session. Please try again.';
+  }
+
+  Future<void> _clearCurrentSessionKey() async {
+    if (_matchId == null || _matchId!.isEmpty) return;
+    try {
+      await SupabaseService.instance.client
+          .from('matches')
+          .update({'current_session_key': null})
+          .eq('id', _matchId!);
+      debugPrint(
+        'SPARK SESSION: cleared current_session_key for matchId=$_matchId',
+      );
+    } catch (e) {
+      debugPrint('SPARK SESSION: could not clear session key — $e');
+    }
+  }
+
+  /// Refund charged session Sparks when Daily.co errors after both users joined.
   Future<void> _refundSparkIfInitiator() async {
     final uid = SupabaseService.instance.currentUserId;
     if (uid == null) return;
 
     if (_matchId == null || _matchId!.isEmpty) return;
+
+    try {
+      final result = await SupabaseService.instance
+          .refundSparkSessionParticipants(
+            matchId: _matchId!,
+            sessionKey: _sessionKey,
+          );
+      debugPrint('SPARK REFUND: bilateral RPC result=$result');
+      return;
+    } catch (e) {
+      if (_isMissingBilateralChargeRpc(e)) {
+        debugPrint(
+          'SPARK REFUND: bilateral RPC unavailable — using legacy initiator-only fallback until migration is applied',
+        );
+      } else {
+        debugPrint('SPARK REFUND: bilateral RPC failed — $e');
+        return;
+      }
+    }
 
     try {
       final sessionRow = await SupabaseService.instance.client

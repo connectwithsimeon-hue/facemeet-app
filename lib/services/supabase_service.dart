@@ -852,6 +852,28 @@ class SupabaseService {
     return _singleRpcMap(response);
   }
 
+  Future<Map<String, dynamic>> chargeSparkSessionParticipants({
+    required String matchId,
+    String? sessionKey,
+  }) async {
+    final response = await client.rpc(
+      'charge_spark_session_participants',
+      params: {'p_match_id': matchId, 'p_session_key': sessionKey},
+    );
+    return _singleRpcMap(response);
+  }
+
+  Future<Map<String, dynamic>> refundSparkSessionParticipants({
+    required String matchId,
+    String? sessionKey,
+  }) async {
+    final response = await client.rpc(
+      'refund_spark_session_participants',
+      params: {'p_match_id': matchId, 'p_session_key': sessionKey},
+    );
+    return _singleRpcMap(response);
+  }
+
   Future<Map<String, dynamic>> startLiveTopic(String liveTopicId) async {
     final response = await client.rpc(
       'start_live_topic',

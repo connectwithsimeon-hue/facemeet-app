@@ -625,6 +625,9 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     }
     if (text.contains('insufficient_sparks') ||
         text.contains('not_enough_sparks')) {
+      if (text.contains('cohost')) {
+        return 'You need 1 Spark to accept this co-host invite.';
+      }
       return 'You need 1 Spark to continue this Live Topic.';
     }
     if (text.contains('cohost_not_accepted')) {
@@ -842,7 +845,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     return Column(
       children: [
         _ActionButton(
-          label: 'Accept Co-host Invite',
+          label: 'Accept as co-host for 1 Spark',
           icon: Icons.check_circle_rounded,
           onPressed: _isBusy
               ? null
@@ -1403,7 +1406,7 @@ class _CohostInviteNoticeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '$creatorName invited you to co-host "$title". Accept when you are ready to help open the room.',
+                  '$creatorName invited you to co-host "$title". Accept for 1 Spark when you are ready to help open the room.',
                   style: GoogleFonts.dmSans(
                     color: AppTheme.textSecondary,
                     height: 1.35,

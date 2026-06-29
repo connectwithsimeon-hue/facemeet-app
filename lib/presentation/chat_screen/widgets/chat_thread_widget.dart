@@ -684,7 +684,7 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(error.toString().replaceFirst('Exception: ', '')),
+            content: Text(_friendlyLiveTopicInviteError(error)),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -692,6 +692,18 @@ class _ChatThreadWidgetState extends State<ChatThreadWidget> {
     } finally {
       if (mounted) setState(() => _isLiveTopicActionBusy = false);
     }
+  }
+
+  String _friendlyLiveTopicInviteError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('not_enough_sparks') ||
+        text.contains('insufficient_sparks')) {
+      return 'You need 1 Spark to accept this co-host invite.';
+    }
+    if (text.contains('invite_not_available')) {
+      return 'This Live Topic invite is no longer available.';
+    }
+    return error.toString().replaceFirst('Exception: ', '');
   }
 
   void _viewPendingLiveTopic() {
@@ -1221,7 +1233,7 @@ class _LiveTopicInviteCard extends StatelessWidget {
         ? 'Live Topic Invite'
         : 'Waiting for $otherName';
     final body = isInviteForMe
-        ? '$otherName invited you to co-host "$topicTitle". Accept when you are ready to help open the room.'
+        ? '$otherName invited you to co-host "$topicTitle". Accept for 1 Spark when you are ready to help open the room.'
         : '$otherName needs to accept "$topicTitle" before the Live Topic room is ready.';
 
     return Container(
@@ -1304,7 +1316,7 @@ class _LiveTopicInviteCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _LiveTopicCardButton(
-                      label: 'Accept',
+                      label: 'Accept for 1 Spark',
                       icon: Icons.check_rounded,
                       onTap: isBusy ? null : onAccept,
                       isPrimary: true,
