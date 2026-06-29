@@ -378,6 +378,7 @@ async function callDailyLiveStreaming(params: {
   action: "start" | "stop";
   rtmpUrl?: string;
   liveTopicId?: string;
+  adminClient?: SupabaseClient;
   rtmpUrlUsable?: boolean;
   playbackUrlUsable?: boolean;
 }) {
@@ -432,6 +433,20 @@ async function callDailyLiveStreaming(params: {
     });
   } finally {
     clearTimeout(timeoutId);
+  }
+
+  if (params.action === "start" && params.adminClient && params.liveTopicId) {
+    await writeHlsDiagnostic(
+      params.adminClient,
+      params.liveTopicId,
+      "daily_start_response_received",
+      "Daily live-streaming start returned a response",
+      {
+        daily_status: response.status,
+        rtmp_url_usable: params.rtmpUrlUsable,
+        playback_url_usable: params.playbackUrlUsable,
+      },
+    );
   }
 
   const bodyText = await response.text().catch(() => "");
@@ -513,6 +528,27 @@ async function persistHlsError(
     logSafe("live_topic_hls_error_persist_failed", {
       live_topic_id: liveTopicId,
       error_code: "db_update_failed",
+    });
+  }
+}
+
+async function writeHlsDiagnostic(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+  code: string,
+  message: string,
+  extra: Partial<HlsErrorDiagnostics> = {},
+) {
+  try {
+    await persistHlsError(adminClient, liveTopicId, {
+      error_code: code,
+      error_message: message,
+      ...extra,
+    });
+  } catch {
+    logSafe("live_topic_hls_diagnostic_write_failed", {
+      live_topic_id: liveTopicId,
+      error_code: code,
     });
   }
 }
@@ -605,6 +641,15 @@ serve(async (req) => {
     if (!isUuid(liveTopicId)) throw makeHlsError("invalid_live_topic");
     if (!["start", "stop", "status"].includes(action)) {
       throw new Error("invalid_action");
+    }
+
+    if (action === "start") {
+      await writeHlsDiagnostic(
+        adminClient,
+        liveTopicId,
+        "hls_start_received",
+        "HLS start request received by Edge Function",
+      );
     }
 
     const topic = await fetchLiveTopic(adminClient, liveTopicId);
@@ -724,10 +769,31 @@ serve(async (req) => {
         });
       }
 
+      await writeHlsDiagnostic(
+        adminClient,
+        liveTopicId,
+        "hls_start_validated",
+        "HLS start validation passed; preparing Daily start request",
+        {
+          rtmp_url_usable: true,
+          playback_url_usable: true,
+        },
+      );
+
       await updateTopicHls(adminClient, liveTopicId, {
         hls_status: "pending",
         hls_ended_at: null,
       });
+      await writeHlsDiagnostic(
+        adminClient,
+        liveTopicId,
+        "daily_start_in_progress",
+        "Calling Daily live-streaming start endpoint",
+        {
+          rtmp_url_usable: true,
+          playback_url_usable: true,
+        },
+      );
       logSafe("live_topic_hls_daily_request", {
         action,
         live_topic_id: liveTopicId,
@@ -745,6 +811,7 @@ serve(async (req) => {
           action: "start",
           rtmpUrl,
           liveTopicId,
+          adminClient,
           rtmpUrlUsable,
           playbackUrlUsable,
         });
@@ -764,6 +831,22 @@ serve(async (req) => {
           hls_started_at: new Date().toISOString(),
           hls_ended_at: null,
         });
+        if (
+          (updated.hls_status ?? "") === "pending" &&
+          !normalizeString(updated.hls_playback_url)
+        ) {
+          await updateTopicHls(adminClient, liveTopicId, {
+            hls_status: "failed",
+            hls_ended_at: null,
+          });
+          const error = makeHlsError("hls_start_exited_while_pending", {
+            error_message: "HLS start path exited while still pending without playback URL",
+            rtmp_url_usable: true,
+            playback_url_usable: true,
+          });
+          await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
+          throw error;
+        }
         await clearHlsError(adminClient, liveTopicId);
         return jsonResponse({
           success: true,
