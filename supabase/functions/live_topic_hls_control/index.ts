@@ -90,6 +90,7 @@ function safeErrorCode(error: unknown) {
     "topic_not_live",
     "topic_ended",
     "daily_room_missing",
+    "daily_hls_output_not_configured",
     "daily_hls_start_failed",
     "daily_hls_stop_failed",
     "daily_service_unavailable",
@@ -119,11 +120,17 @@ function safeErrorMessage(error: unknown) {
       return "This Live Topic has ended.";
     case "daily_room_missing":
       return "Live Topic video room is not ready yet.";
+    case "daily_hls_output_not_configured":
+      return "Live playback is not configured yet.";
     case "daily_service_unavailable":
       return "Live playback service is unavailable.";
     default:
       return "Live playback could not be updated.";
   }
+}
+
+function logSafe(event: string, data: Record<string, unknown>) {
+  console.log(JSON.stringify({ event, ...data }));
 }
 
 function extractPlaybackUrl(value: unknown): string {
@@ -261,7 +268,17 @@ async function callDailyLiveStreaming(params: {
   dailyApiKey: string;
   roomName: string;
   action: "start" | "stop";
+  rtmpUrl?: string;
 }) {
+  const requestBody = params.action === "start"
+    ? JSON.stringify({
+      rtmpUrl: params.rtmpUrl,
+      layout: { preset: "default", max_cam_streams: MAX_PARTICIPANTS },
+      maxDuration: FALLBACK_ROOM_TTL_SECONDS,
+      minIdleTimeOut: 60,
+    })
+    : undefined;
+
   const response = await fetch(
     `https://api.daily.co/v1/rooms/${
       encodeURIComponent(params.roomName)
@@ -272,29 +289,55 @@ async function callDailyLiveStreaming(params: {
         Authorization: `Bearer ${params.dailyApiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ type: "hls" }),
+      ...(requestBody ? { body: requestBody } : {}),
     },
   );
 
   const bodyText = await response.text().catch(() => "");
-  let body: Record<string, unknown> = {};
+  let responseBody: Record<string, unknown> = {};
   if (bodyText.trim()) {
     try {
-      body = JSON.parse(bodyText) as Record<string, unknown>;
+      responseBody = JSON.parse(bodyText) as Record<string, unknown>;
     } catch {
-      body = {};
+      responseBody = {};
     }
   }
 
   if (!response.ok) {
+    logSafe("live_topic_hls_daily_response", {
+      action: params.action,
+      room_name_present: Boolean(params.roomName),
+      daily_status: response.status,
+      response_keys: Object.keys(responseBody),
+      playback_url_present: Boolean(extractPlaybackUrl(responseBody)),
+      error_code: params.action === "start"
+        ? "daily_hls_start_failed"
+        : "daily_hls_stop_failed",
+    });
     throw new Error(
       params.action === "start"
         ? `daily_hls_start_failed:${response.status}:${safeDailyMessage(bodyText)}`
         : `daily_hls_stop_failed:${response.status}:${safeDailyMessage(bodyText)}`,
-    );
+      );
   }
 
-  return body;
+  logSafe("live_topic_hls_daily_response", {
+    action: params.action,
+    room_name_present: Boolean(params.roomName),
+    daily_status: response.status,
+    response_keys: Object.keys(responseBody),
+    playback_url_present: Boolean(extractPlaybackUrl(responseBody)),
+    sent: responseBody.sent === true || responseBody.sent === "true",
+  });
+
+  return responseBody;
+}
+
+function playbackUrlFromTemplate(template: string, topic: LiveTopicRow, roomName: string) {
+  const value = template
+    .replaceAll("{live_topic_id}", encodeURIComponent(topic.id))
+    .replaceAll("{room_name}", encodeURIComponent(roomName));
+  return extractPlaybackUrl(value);
 }
 
 async function updateTopicHls(
@@ -334,6 +377,11 @@ serve(async (req) => {
 
     const dailyApiKey = Deno.env.get("DAILY_API_KEY")?.trim() || "";
     if (!dailyApiKey) throw new Error("daily_service_unavailable");
+    const rtmpUrl = Deno.env.get("LIVE_TOPIC_HLS_RTMP_URL")?.trim() || "";
+    const playbackUrlTemplate =
+      Deno.env.get("LIVE_TOPIC_HLS_PLAYBACK_URL")?.trim() ||
+      Deno.env.get("LIVE_TOPIC_HLS_PLAYBACK_URL_TEMPLATE")?.trim() ||
+      "";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -360,6 +408,14 @@ serve(async (req) => {
     const callerUserId = authData.user.id;
     const isHostOrCohost =
       topic.creator_user_id === callerUserId || topic.cohost_user_id === callerUserId;
+    logSafe("live_topic_hls_request", {
+      action,
+      live_topic_id: liveTopicId,
+      authorized: isHostOrCohost,
+      room_name_present: Boolean(topic.daily_room_name),
+      room_url_present: Boolean(topic.daily_room_url),
+      hls_status: topic.hls_status ?? "not_started",
+    });
     if (!isHostOrCohost) throw new Error("not_host_or_cohost");
 
     if (action === "status") {
@@ -394,6 +450,21 @@ serve(async (req) => {
     if (action === "start") {
       const roomAccess = await ensureDailyRoom({ adminClient, dailyApiKey, topic });
       const roomName = resolveRoomName(roomAccess.topic);
+      if (!rtmpUrl || !playbackUrlTemplate) {
+        logSafe("live_topic_hls_missing_output_config", {
+          action,
+          live_topic_id: liveTopicId,
+          room_name_present: Boolean(roomName),
+          rtmp_url_configured: Boolean(rtmpUrl),
+          playback_url_configured: Boolean(playbackUrlTemplate),
+          error_code: "daily_hls_output_not_configured",
+        });
+        await updateTopicHls(adminClient, liveTopicId, {
+          hls_status: "failed",
+          hls_ended_at: null,
+        });
+        throw new Error("daily_hls_output_not_configured");
+      }
       if (
         roomAccess.topic.hls_status === "live" &&
         normalizeString(roomAccess.topic.hls_playback_url).length > 0
@@ -417,8 +488,10 @@ serve(async (req) => {
           dailyApiKey,
           roomName,
           action: "start",
+          rtmpUrl,
         });
-        const playbackUrl = extractPlaybackUrl(dailyBody);
+        const playbackUrl = extractPlaybackUrl(dailyBody) ||
+          playbackUrlFromTemplate(playbackUrlTemplate, roomAccess.topic, roomName);
         const updated = await updateTopicHls(adminClient, liveTopicId, {
           hls_status: playbackUrl ? "live" : "pending",
           hls_playback_url: playbackUrl || null,
