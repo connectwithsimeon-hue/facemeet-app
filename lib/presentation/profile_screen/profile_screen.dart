@@ -624,7 +624,9 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _referralShareMessage(String inviteUrl) =>
-      'Join me on FaceMeet — a video-first way to meet people through Sparks and Live Topics. Use my link:\n$inviteUrl';
+      'Join me on FaceMeet — a video-first way to meet people through Sparks, Live Topics, and real conversations.\n\n'
+      'Use my invite link:\n$inviteUrl\n\n'
+      'When you join, we both may earn Sparks.';
 
   Future<String> _ensureReferralShareUrl() async {
     final existing = _referralLink.trim();
@@ -737,21 +739,24 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _publicProfileShareCopy(Map<String, dynamic> profile, String url) {
-    final intent = SupabaseService.normalizeConnectionIntent(
-      profile['connection_intent'] as String?,
-    );
-    switch (intent) {
-      case 'professional':
-        return 'I\'m on FaceMeet for Professional Connections. Watch my profile video and Spark me here:\n$url';
-      case 'friendship':
-        return 'I\'m on FaceMeet for Friendship. Watch my profile video and Spark me here:\n$url';
-      case 'dating':
-        return 'I\'m on FaceMeet for Social Connections. Watch my profile video and Spark me here:\n$url';
-      case 'open_to_all':
-        return 'I\'m on FaceMeet for real connections. Watch my profile video and Spark me here:\n$url';
-      default:
-        return 'Watch my FaceMeet profile video and Spark me here:\n$url';
+    final displayName =
+        [
+              profile['first_name'],
+              profile['display_name'],
+              profile['full_name'],
+              profile['username'],
+            ]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+    if (displayName.isNotEmpty) {
+      return 'Connect with $displayName on FaceMeet.\n\n$url\n\n'
+          'FaceMeet is a video-first way to meet people through Sparks, Live Topics, and real conversations.';
     }
+
+    return 'Connect with me on FaceMeet.\n\n'
+        'FaceMeet is a video-first way to meet people through Sparks, Live Topics, and real conversations.\n\n'
+        'My profile:\n$url';
   }
 
   Future<void> _sharePublicProfile(Map<String, dynamic> profile) async {
@@ -1356,7 +1361,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                         )
                       : const Icon(Icons.ios_share_rounded, size: 18),
                   label: Text(
-                    'Share My Profile Video',
+                    'Share My Profile',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.dmSans(

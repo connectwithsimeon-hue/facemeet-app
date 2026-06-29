@@ -642,12 +642,20 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   Future<void> _share() async {
     final title = _liveTopic?['title']?.toString() ?? 'this Live Topic';
     final shareHook = _liveTopic?['curated_share_hook']?.toString().trim();
-    final isLive = _liveTopic?['status'] == 'live';
-    final copy = shareHook != null && shareHook.isNotEmpty
-        ? '$shareHook\n$_shareUrl'
-        : isLive
-        ? 'I\'m live on FaceMeet discussing "$title".\nWatch, ask a question, or request to join:\n$_shareUrl'
-        : 'I\'m starting a FaceMeet Live Topic about "$title".\nJoin when we go live:\n$_shareUrl';
+    final status = _liveTopic?['status']?.toString();
+    final copy = switch (status) {
+      'live' =>
+        'I\'m live on FaceMeet talking about: $title\n\n'
+            'Join the conversation here:\n$_shareUrl\n\n'
+            'FaceMeet is a video-first way to meet people through Sparks and Live Topics.',
+      'ended' || 'expired' || 'cancelled' =>
+        'This FaceMeet Live Topic has ended, but you can still discover more conversations here:\n$_shareUrl',
+      _ =>
+        shareHook != null && shareHook.isNotEmpty
+            ? '$shareHook\n\nFollow or join when it starts:\n$_shareUrl'
+            : 'I\'m starting a FaceMeet Live Topic: $title\n\n'
+                  'Follow or join when it starts:\n$_shareUrl',
+    };
     await Share.share(copy, subject: 'FaceMeet Live Topic');
   }
 
