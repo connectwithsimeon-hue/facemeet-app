@@ -91,6 +91,7 @@ function safeErrorCode(error: unknown) {
     "topic_ended",
     "daily_room_missing",
     "daily_hls_output_not_configured",
+    "daily_hls_output_invalid",
     "daily_hls_start_failed",
     "daily_hls_stop_failed",
     "daily_service_unavailable",
@@ -122,6 +123,8 @@ function safeErrorMessage(error: unknown) {
       return "Live Topic video room is not ready yet.";
     case "daily_hls_output_not_configured":
       return "Live playback is not configured yet.";
+    case "daily_hls_output_invalid":
+      return "Live playback is not configured correctly yet.";
     case "daily_service_unavailable":
       return "Live playback service is unavailable.";
     default:
@@ -174,6 +177,22 @@ function extractPlaybackUrl(value: unknown): string {
   }
 
   return "";
+}
+
+function rtmpUrlLooksUsable(value: string) {
+  try {
+    const url = new URL(value);
+    const pathSegments = url.pathname.split("/").filter(Boolean);
+    return url.protocol === "rtmps:" &&
+      pathSegments.length >= 2 &&
+      pathSegments[0].toLowerCase() === "live";
+  } catch {
+    return false;
+  }
+}
+
+function playbackUrlLooksUsable(value: string) {
+  return Boolean(extractPlaybackUrl(value));
 }
 
 async function fetchLiveTopic(
@@ -269,6 +288,7 @@ async function callDailyLiveStreaming(params: {
   roomName: string;
   action: "start" | "stop";
   rtmpUrl?: string;
+  liveTopicId?: string;
 }) {
   const requestBody = params.action === "start"
     ? JSON.stringify({
@@ -306,6 +326,7 @@ async function callDailyLiveStreaming(params: {
   if (!response.ok) {
     logSafe("live_topic_hls_daily_response", {
       action: params.action,
+      live_topic_id: params.liveTopicId ?? "",
       room_name_present: Boolean(params.roomName),
       daily_status: response.status,
       response_keys: Object.keys(responseBody),
@@ -323,6 +344,7 @@ async function callDailyLiveStreaming(params: {
 
   logSafe("live_topic_hls_daily_response", {
     action: params.action,
+    live_topic_id: params.liveTopicId ?? "",
     room_name_present: Boolean(params.roomName),
     daily_status: response.status,
     response_keys: Object.keys(responseBody),
@@ -465,6 +487,25 @@ serve(async (req) => {
         });
         throw new Error("daily_hls_output_not_configured");
       }
+      const rtmpUrlUsable = rtmpUrlLooksUsable(rtmpUrl);
+      const playbackUrlUsable = playbackUrlLooksUsable(playbackUrlTemplate);
+      if (!rtmpUrlUsable || !playbackUrlUsable) {
+        logSafe("live_topic_hls_invalid_output_config", {
+          action,
+          live_topic_id: liveTopicId,
+          room_name_present: Boolean(roomName),
+          rtmp_url_configured: Boolean(rtmpUrl),
+          rtmp_url_usable: rtmpUrlUsable,
+          playback_url_configured: Boolean(playbackUrlTemplate),
+          playback_url_usable: playbackUrlUsable,
+          error_code: "daily_hls_output_invalid",
+        });
+        await updateTopicHls(adminClient, liveTopicId, {
+          hls_status: "failed",
+          hls_ended_at: null,
+        });
+        throw new Error("daily_hls_output_invalid");
+      }
       if (
         roomAccess.topic.hls_status === "live" &&
         normalizeString(roomAccess.topic.hls_playback_url).length > 0
@@ -482,6 +523,15 @@ serve(async (req) => {
         hls_status: "pending",
         hls_ended_at: null,
       });
+      logSafe("live_topic_hls_daily_request", {
+        action,
+        live_topic_id: liveTopicId,
+        room_name_present: Boolean(roomName),
+        rtmp_url_configured: true,
+        rtmp_url_usable: true,
+        playback_url_configured: true,
+        playback_url_usable: true,
+      });
 
       try {
         const dailyBody = await callDailyLiveStreaming({
@@ -489,6 +539,7 @@ serve(async (req) => {
           roomName,
           action: "start",
           rtmpUrl,
+          liveTopicId,
         });
         const playbackUrl = extractPlaybackUrl(dailyBody) ||
           playbackUrlFromTemplate(playbackUrlTemplate, roomAccess.topic, roomName);
@@ -537,6 +588,7 @@ serve(async (req) => {
         dailyApiKey,
         roomName,
         action: "stop",
+        liveTopicId,
       });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error ?? "");
