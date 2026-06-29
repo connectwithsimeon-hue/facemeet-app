@@ -2112,6 +2112,16 @@ class _LiveTopicAudienceCard extends StatelessWidget {
         audienceAccess?['hls_status']?.toString() ??
         topic['hls_status']?.toString() ??
         'not_started';
+    final hlsLastErrorCode =
+        audienceAccess?['hls_last_error_code']?.toString().trim() ??
+        topic['hls_last_error_code']?.toString().trim() ??
+        '';
+    final hlsStartWasRequested = {
+      'hls_start_received',
+      'hls_start_validated',
+      'daily_start_in_progress',
+      'daily_start_response_received',
+    }.contains(hlsLastErrorCode);
     final accessGranted =
         audienceAccess?['access_granted'] == true ||
         topic['viewer_access_type']?.toString().isNotEmpty == true;
@@ -2163,11 +2173,29 @@ class _LiveTopicAudienceCard extends StatelessWidget {
       return _HlsPlaybackCard(hlsUrl: hlsUrl);
     }
 
+    if (hlsStatus == 'pending' && hlsStartWasRequested) {
+      return const _VideoPlaceholderCard(
+        icon: Icons.podcasts_rounded,
+        title: 'Live playback is being prepared',
+        body:
+            'The host and co-host are live. Watch/listen playback will appear here when HLS is available.',
+      );
+    }
+
+    if (hlsStatus == 'failed') {
+      return const _VideoPlaceholderCard(
+        icon: Icons.podcasts_rounded,
+        title: 'Live playback is not available yet',
+        body:
+            'The room is live, but watch/listen playback could not start. Please check back shortly.',
+      );
+    }
+
     return const _VideoPlaceholderCard(
       icon: Icons.podcasts_rounded,
-      title: 'Live playback is being prepared',
+      title: 'Live playback has not started yet',
       body:
-          'The host and co-host are live. Watch/listen playback will appear here when HLS is available.',
+          'The host and co-host are live. Watch/listen playback will appear here after the host starts streaming.',
     );
   }
 }
