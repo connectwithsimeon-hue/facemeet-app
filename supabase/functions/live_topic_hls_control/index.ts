@@ -9,6 +9,8 @@ const corsHeaders = {
 
 const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const MAX_PARTICIPANTS = 4;
+const DAILY_START_TIMEOUT_MS = 10_000;
+const DAILY_STOP_TIMEOUT_MS = 8_000;
 
 type LiveTopicRow = {
   id: string;
@@ -113,8 +115,12 @@ function safeErrorCode(error: unknown) {
     "invalid_rtmp_config",
     "invalid_playback_config",
     "daily_hls_output_invalid",
+    "daily_start_timeout",
+    "daily_start_fetch_failed",
     "daily_start_failed",
     "daily_response_unexpected",
+    "daily_stop_timeout",
+    "daily_stop_fetch_failed",
     "db_update_failed",
     "daily_hls_start_failed",
     "daily_hls_stop_failed",
@@ -155,9 +161,14 @@ function safeErrorMessage(error: unknown) {
     case "invalid_rtmp_config":
     case "invalid_playback_config":
       return "Live playback is not configured correctly yet.";
+    case "daily_start_timeout":
+    case "daily_start_fetch_failed":
     case "daily_start_failed":
     case "daily_response_unexpected":
       return "Live playback could not start yet.";
+    case "daily_stop_timeout":
+    case "daily_stop_fetch_failed":
+      return "Live playback could not stop cleanly yet.";
     case "db_update_failed":
       return "Live playback state could not be saved.";
     case "daily_service_unavailable":
@@ -367,6 +378,8 @@ async function callDailyLiveStreaming(params: {
   action: "start" | "stop";
   rtmpUrl?: string;
   liveTopicId?: string;
+  rtmpUrlUsable?: boolean;
+  playbackUrlUsable?: boolean;
 }) {
   const requestBody = params.action === "start"
     ? JSON.stringify({
@@ -377,19 +390,49 @@ async function callDailyLiveStreaming(params: {
     })
     : undefined;
 
-  const response = await fetch(
-    `https://api.daily.co/v1/rooms/${
-      encodeURIComponent(params.roomName)
-    }/live-streaming/${params.action}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${params.dailyApiKey}`,
-        "Content-Type": "application/json",
+  const controller = new AbortController();
+  const timeoutMs = params.action === "start"
+    ? DAILY_START_TIMEOUT_MS
+    : DAILY_STOP_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.daily.co/v1/rooms/${
+        encodeURIComponent(params.roomName)
+      }/live-streaming/${params.action}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.dailyApiKey}`,
+          "Content-Type": "application/json",
+        },
+        ...(requestBody ? { body: requestBody } : {}),
+        signal: controller.signal,
       },
-      ...(requestBody ? { body: requestBody } : {}),
-    },
-  );
+    );
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === "AbortError";
+    const code = isTimeout
+      ? (params.action === "start" ? "daily_start_timeout" : "daily_stop_timeout")
+      : (params.action === "start" ? "daily_start_fetch_failed" : "daily_stop_fetch_failed");
+    logSafe("live_topic_hls_daily_fetch_error", {
+      action: params.action,
+      live_topic_id: params.liveTopicId ?? "",
+      room_name_present: Boolean(params.roomName),
+      error_code: code,
+      timeout_ms: timeoutMs,
+    });
+    throw makeHlsError(code, {
+      error_message: isTimeout
+        ? `Daily live-streaming ${params.action} request timed out`
+        : `Daily live-streaming ${params.action} request failed`,
+      rtmp_url_usable: params.rtmpUrlUsable,
+      playback_url_usable: params.playbackUrlUsable,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const bodyText = await response.text().catch(() => "");
   let responseBody: Record<string, unknown> = {};
@@ -420,6 +463,8 @@ async function callDailyLiveStreaming(params: {
       error_message: safeDailyMessage(bodyText),
       daily_status: response.status,
       daily_response_keys: Object.keys(responseBody),
+      rtmp_url_usable: params.rtmpUrlUsable,
+      playback_url_usable: params.playbackUrlUsable,
     });
   }
 
@@ -700,6 +745,8 @@ serve(async (req) => {
           action: "start",
           rtmpUrl,
           liveTopicId,
+          rtmpUrlUsable,
+          playbackUrlUsable,
         });
         const playbackUrl = extractPlaybackUrl(dailyBody) ||
           playbackUrlFromTemplate(playbackUrlTemplate, roomAccess.topic, roomName);
