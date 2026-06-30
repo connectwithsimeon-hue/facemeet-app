@@ -628,6 +628,94 @@ async function ensureHlsStartedFromDailyAccess(params: {
   }
   const responseKeys = Object.keys(responseBody);
 
+  if (response.status === 404) {
+    await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+      status: "pending",
+      errorCode: "daily_room_recreate_after_start_not_found",
+      errorMessage: "Daily HLS start could not find the room; recreating private room.",
+      dailyStatus: 404,
+      dailyResponseKeys: responseKeys,
+    });
+
+    const replacementRoom = await createDailyRoom({
+      dailyApiKey: params.dailyApiKey,
+      roomName: params.roomName,
+      roomExpiresAt: roomExpiresAtIso(params.topic),
+    });
+
+    await params.adminClient
+      .from("live_topics")
+      .update({
+        daily_room_url: replacementRoom.roomUrl,
+        daily_room_name: replacementRoom.roomName,
+      })
+      .eq("id", params.topic.id)
+      .eq("status", "live");
+
+    const retryController = new AbortController();
+    const retryTimeoutId = setTimeout(
+      () => retryController.abort(),
+      DAILY_HLS_START_TIMEOUT_MS,
+    );
+    try {
+      response = await fetch(
+        `https://api.daily.co/v1/rooms/${
+          encodeURIComponent(replacementRoom.roomName)
+        }/live-streaming/start`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${params.dailyApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ rtmpUrl }),
+          signal: retryController.signal,
+        },
+      );
+    } catch (error) {
+      const isTimeout = error instanceof DOMException && error.name === "AbortError";
+      await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+        status: "failed",
+        errorCode: isTimeout ? "daily_start_timeout" : "daily_start_fetch_failed",
+        errorMessage: isTimeout
+          ? "Daily live-streaming start retry timed out."
+          : "Daily live-streaming start retry failed.",
+        dailyStatus: null,
+        dailyResponseKeys: null,
+      });
+      return;
+    } finally {
+      clearTimeout(retryTimeoutId);
+    }
+
+    const retryBodyText = await response.text().catch(() => "");
+    responseBody = {};
+    if (retryBodyText.trim()) {
+      try {
+        responseBody = JSON.parse(retryBodyText) as Record<string, unknown>;
+      } catch {
+        responseBody = {};
+      }
+    }
+    if (!response.ok) {
+      await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+        status: "failed",
+        errorCode: "daily_start_failed",
+        errorMessage: safeDailyProviderMessage(retryBodyText),
+        dailyStatus: response.status,
+        dailyResponseKeys: Object.keys(responseBody),
+      });
+      return;
+    }
+
+    await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+      status: "live",
+      playbackUrl,
+      started: true,
+    });
+    return;
+  }
+
   if (!response.ok) {
     await persistHlsDiagnostic(params.adminClient, params.topic.id, {
       status: "failed",

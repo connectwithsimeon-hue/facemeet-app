@@ -939,6 +939,82 @@ serve(async (req) => {
         });
       } catch (error) {
         const diagnostics = safeErrorDiagnostics(error);
+        if (diagnostics.daily_status === 404) {
+          await writeHlsDiagnostic(
+            adminClient,
+            liveTopicId,
+            "daily_room_recreate_after_start_not_found",
+            "Daily HLS start could not find the room; recreating private room.",
+            {
+              daily_status: 404,
+              daily_response_keys: diagnostics.daily_response_keys,
+              rtmp_url_usable: true,
+              playback_url_usable: true,
+            },
+          );
+
+          const replacementRoom = await createDailyRoom({
+            dailyApiKey,
+            roomName,
+            roomExpiresAt: roomExpiresAtIso(roomAccess.topic),
+          });
+          await adminClient
+            .from("live_topics")
+            .update({
+              daily_room_url: replacementRoom.roomUrl,
+              daily_room_name: replacementRoom.roomName,
+            })
+            .eq("id", liveTopicId)
+            .eq("status", "live");
+          roomName = replacementRoom.roomName;
+
+          try {
+            const dailyBody = await callDailyLiveStreaming({
+              dailyApiKey,
+              roomName,
+              action: "start",
+              rtmpUrl,
+              liveTopicId,
+              adminClient,
+              rtmpUrlUsable,
+              playbackUrlUsable,
+            });
+            const playbackUrl = extractPlaybackUrl(dailyBody) ||
+              playbackUrlFromTemplate(playbackUrlTemplate, roomAccess.topic, roomName);
+            if (!playbackUrl) {
+              throw makeHlsError("daily_response_unexpected", {
+                error_message: "Daily accepted start but no configured playback URL was usable.",
+                daily_response_keys: Object.keys(dailyBody),
+                rtmp_url_usable: true,
+                playback_url_usable: false,
+              });
+            }
+            const updated = await updateTopicHls(adminClient, liveTopicId, {
+              hls_status: "live",
+              hls_playback_url: playbackUrl,
+              hls_started_at: new Date().toISOString(),
+              hls_ended_at: null,
+            });
+            await clearHlsError(adminClient, liveTopicId);
+            return jsonResponse({
+              success: true,
+              live_topic_id: updated.id,
+              hls_status: updated.hls_status ?? "pending",
+              hls_playback_url: updated.hls_playback_url ?? "",
+              playback_url_available: Boolean(playbackUrl),
+              recreated_daily_room: true,
+            });
+          } catch (retryError) {
+            const retryDiagnostics = safeErrorDiagnostics(retryError);
+            await updateTopicHls(adminClient, liveTopicId, {
+              hls_status: "failed",
+              hls_ended_at: null,
+            });
+            await persistHlsError(adminClient, liveTopicId, retryDiagnostics);
+            throw retryError;
+          }
+        }
+
         await updateTopicHls(adminClient, liveTopicId, {
           hls_status: "failed",
           hls_ended_at: null,
