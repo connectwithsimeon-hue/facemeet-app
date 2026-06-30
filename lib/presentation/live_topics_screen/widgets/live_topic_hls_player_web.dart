@@ -58,29 +58,53 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     .wrap { position: relative; width: 100%; height: 100%; background: #000; }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-    .hint { position: absolute; left: 14px; right: 14px; bottom: 14px; padding: 10px 12px; border-radius: 16px; background: rgba(0,0,0,.58); color: white; font: 600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; text-align: center; pointer-events: none; }
+    .badge { position: absolute; left: 14px; top: 14px; padding: 8px 11px; border-radius: 999px; background: rgba(0,0,0,.58); color: white; font: 800 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; border: 1px solid rgba(255,255,255,.14); }
+    .badge::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 99px; background: #ef4d3f; }
+    .resume { position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.62); color: white; font: 800 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; }
+    .hint { position: absolute; left: 14px; right: 14px; bottom: 68px; padding: 10px 12px; border-radius: 16px; background: rgba(0,0,0,.58); color: white; font: 600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; text-align: center; pointer-events: none; }
     .hidden { display: none; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
 </head>
 <body>
   <div class="wrap">
-    <video id="video" controls playsinline webkit-playsinline autoplay></video>
-    <div id="hint" class="hint">Tap play if the live stream does not start automatically.</div>
+    <video id="video" playsinline webkit-playsinline autoplay></video>
+    <div class="badge">Live</div>
+    <button id="resume" class="resume" aria-label="Resume live playback">▶</button>
+    <div id="hint" class="hint">Tap the video if live playback does not start automatically.</div>
   </div>
   <script>
     (function () {
       const src = $hlsUrl;
       const video = document.getElementById('video');
       const hint = document.getElementById('hint');
+      const resume = document.getElementById('resume');
+      let wakeLock = null;
+      async function requestWakeLock() {
+        try {
+          if ('wakeLock' in navigator && !wakeLock) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', function () { wakeLock = null; });
+          }
+        } catch (_) {}
+      }
+      function playLive() {
+        requestWakeLock();
+        video.play().catch(function () {});
+      }
       function showError() { hint.textContent = 'Live playback is not available yet. Please try again shortly.'; }
       function hideHintLater() { setTimeout(function () { hint.classList.add('hidden'); }, 5000); }
       video.addEventListener('playing', hideHintLater);
       video.addEventListener('error', showError);
+      video.addEventListener('click', playLive);
+      resume.addEventListener('click', playLive);
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) playLive();
+      });
       if (!src) { showError(); return; }
       if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = src;
-        video.play().catch(function () {});
+        playLive();
         return;
       }
       if (window.Hls && window.Hls.isSupported()) {
@@ -91,7 +115,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
         hls.loadSource(src);
         hls.attachMedia(video);
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-          video.play().catch(function () {});
+          playLive();
         });
         return;
       }

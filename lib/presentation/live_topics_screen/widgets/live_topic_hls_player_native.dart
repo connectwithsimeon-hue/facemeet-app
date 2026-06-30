@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../theme/app_theme.dart';
 
@@ -12,7 +13,8 @@ class LiveTopicHlsPlayer extends StatefulWidget {
   State<LiveTopicHlsPlayer> createState() => _LiveTopicHlsPlayerState();
 }
 
-class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
+class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
+    with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   bool _isInitializing = true;
   String? _error;
@@ -20,6 +22,8 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _setWakeLock(true);
     _init();
   }
 
@@ -31,7 +35,16 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
       _controller = null;
       _isInitializing = true;
       _error = null;
+      _setWakeLock(true);
       _init();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _setWakeLock(true);
+      _controller?.play();
     }
   }
 
@@ -43,6 +56,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
       _controller = controller;
       await controller.initialize();
       await controller.setVolume(1);
+      await controller.play();
       if (!mounted) return;
       setState(() => _isInitializing = false);
     } catch (error) {
@@ -55,8 +69,22 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
     }
   }
 
+  Future<void> _setWakeLock(bool enabled) async {
+    try {
+      if (enabled) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } catch (error) {
+      debugPrint('LIVE TOPIC HLS: wake lock update skipped — $error');
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _setWakeLock(false);
     _controller?.dispose();
     super.dispose();
   }
@@ -101,23 +129,50 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
             ),
             Positioned(
               left: 16,
+              top: 16,
+              child: SafeArea(
+                bottom: false,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(154),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white.withAlpha(36)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.circle, color: AppTheme.primary, size: 8),
+                      SizedBox(width: 8),
+                      Text(
+                        'Live',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
               right: 16,
               bottom: 16,
               child: SafeArea(
                 top: false,
-                child: _LiveTopicHlsActionButton(
-                  label: controller.value.isPlaying ? 'Pause' : 'Play Live',
-                  icon: controller.value.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  onPressed: () async {
-                    if (controller.value.isPlaying) {
-                      await controller.pause();
-                    } else {
-                      await controller.play();
-                    }
-                    if (mounted) setState(() {});
-                  },
+                child: IconButton.filled(
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withAlpha(154),
+                    foregroundColor: Colors.white,
+                  ),
+                  tooltip: 'Resume live',
+                  onPressed: () => controller.play(),
+                  icon: const Icon(Icons.sensors_rounded),
                 ),
               ),
             ),
@@ -175,33 +230,6 @@ class _LiveTopicHlsPlaceholder extends StatelessWidget {
             const CircularProgressIndicator(color: AppTheme.primary),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _LiveTopicHlsActionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  const _LiveTopicHlsActionButton({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       ),
     );
   }
