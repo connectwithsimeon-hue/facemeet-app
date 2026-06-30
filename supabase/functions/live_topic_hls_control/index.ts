@@ -385,9 +385,6 @@ async function callDailyLiveStreaming(params: {
   const requestBody = params.action === "start"
     ? JSON.stringify({
       rtmpUrl: params.rtmpUrl,
-      layout: { preset: "default", max_cam_streams: MAX_PARTICIPANTS },
-      maxDuration: FALLBACK_ROOM_TTL_SECONDS,
-      minIdleTimeOut: 60,
     })
     : undefined;
 
@@ -597,6 +594,10 @@ async function updateTopicHls(
 }
 
 serve(async (req) => {
+  let diagnosticAdminClient: SupabaseClient | null = null;
+  let diagnosticLiveTopicId = "";
+  let diagnosticAction = "";
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -636,6 +637,9 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const liveTopicId = normalizeString(body?.live_topic_id);
     const action = normalizeString(body?.action).toLowerCase();
+    diagnosticAdminClient = adminClient;
+    diagnosticLiveTopicId = liveTopicId;
+    diagnosticAction = action;
 
     if (!liveTopicId) throw makeHlsError("missing_live_topic_id");
     if (!isUuid(liveTopicId)) throw makeHlsError("invalid_live_topic");
@@ -909,6 +913,30 @@ serve(async (req) => {
     });
   } catch (error) {
     const diagnostics = safeErrorDiagnostics(error);
+    if (
+      diagnosticAdminClient &&
+      diagnosticAction === "start" &&
+      isUuid(diagnosticLiveTopicId)
+    ) {
+      try {
+        await updateTopicHls(diagnosticAdminClient, diagnosticLiveTopicId, {
+          hls_status: "failed",
+          hls_ended_at: null,
+        });
+      } catch {
+        logSafe("live_topic_hls_final_status_persist_failed", {
+          live_topic_id: diagnosticLiveTopicId,
+          error_code: "db_update_failed",
+        });
+      }
+
+      await persistHlsError(
+        diagnosticAdminClient,
+        diagnosticLiveTopicId,
+        diagnostics,
+      );
+    }
+
     return jsonResponse({
       ok: false,
       error: diagnostics.error_code,
