@@ -201,7 +201,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
                     ? constraints.maxHeight
                     : videoSize.height;
                 return FittedBox(
-                  fit: BoxFit.cover,
+                  fit: BoxFit.contain,
                   clipBehavior: Clip.hardEdge,
                   child: SizedBox(
                     width: videoWidth,
