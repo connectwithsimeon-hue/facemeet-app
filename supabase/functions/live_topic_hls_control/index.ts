@@ -11,10 +11,6 @@ const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const MAX_PARTICIPANTS = 4;
 const DAILY_START_TIMEOUT_MS = 10_000;
 const DAILY_STOP_TIMEOUT_MS = 8_000;
-const LIVE_TOPIC_HLS_LAYOUT = {
-  preset: "default",
-  max_cam_streams: MAX_PARTICIPANTS,
-};
 
 type LiveTopicRow = {
   id: string;
@@ -463,7 +459,6 @@ async function callDailyLiveStreaming(params: {
   const requestBody = params.action === "start"
     ? JSON.stringify({
       rtmpUrl: params.rtmpUrl,
-      layout: LIVE_TOPIC_HLS_LAYOUT,
     })
     : undefined;
 

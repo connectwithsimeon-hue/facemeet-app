@@ -10,10 +10,6 @@ const corsHeaders = {
 const MAX_PARTICIPANTS = 4;
 const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const DAILY_HLS_START_TIMEOUT_MS = 10_000;
-const LIVE_TOPIC_HLS_LAYOUT = {
-  preset: "default",
-  max_cam_streams: MAX_PARTICIPANTS,
-};
 
 type LiveTopicRow = {
   id: string;
@@ -600,7 +596,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
           Authorization: `Bearer ${params.dailyApiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ rtmpUrl, layout: LIVE_TOPIC_HLS_LAYOUT }),
+        body: JSON.stringify({ rtmpUrl }),
         signal: controller.signal,
       },
     );
@@ -683,7 +679,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
             Authorization: `Bearer ${params.dailyApiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ rtmpUrl, layout: LIVE_TOPIC_HLS_LAYOUT }),
+          body: JSON.stringify({ rtmpUrl }),
           signal: retryController.signal,
         },
       );

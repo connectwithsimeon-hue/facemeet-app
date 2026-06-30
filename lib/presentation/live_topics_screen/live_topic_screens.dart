@@ -777,7 +777,6 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   bool _isLoadingAudienceAccess = false;
   bool _isStartingHls = false;
   DateTime? _lastHlsStartAttemptAt;
-  DateTime? _lastHlsFailureSnackAt;
   Map<String, dynamic>? _audienceAccess;
 
   @override
@@ -1145,14 +1144,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   }
 
   void _showHlsFailureSnack() {
-    if (!mounted) return;
-    final lastShown = _lastHlsFailureSnackAt;
-    if (lastShown != null &&
-        DateTime.now().difference(lastShown) < const Duration(seconds: 45)) {
-      return;
-    }
-    _lastHlsFailureSnackAt = DateTime.now();
-    _showSnack('Live playback could not start yet.');
+    debugPrint('LIVE TOPIC HLS: start retry deferred; playback not ready yet.');
   }
 
   Future<void> _stopHlsPlayback() async {
@@ -2734,9 +2726,10 @@ class _LiveTopicAudienceCard extends StatelessWidget {
     if (hlsStatus == 'failed') {
       return const _VideoPlaceholderCard(
         icon: Icons.podcasts_rounded,
-        title: 'Live playback is not available yet',
+        title: 'Connecting live playback...',
         body:
-            'The room is live, but watch/listen playback could not start. Please check back shortly.',
+            'The room is live. Watch/listen playback is warming up and will appear here shortly.',
+        showSpinner: true,
       );
     }
 
