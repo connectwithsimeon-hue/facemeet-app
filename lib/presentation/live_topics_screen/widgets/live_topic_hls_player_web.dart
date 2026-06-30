@@ -80,6 +80,11 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
       const hint = document.getElementById('hint');
       const resume = document.getElementById('resume');
       let wakeLock = null;
+      let hls = null;
+      let retryTimer = null;
+      let retryCount = 0;
+      const maxRetries = 24;
+      const retryDelayMs = 3000;
       async function requestWakeLock() {
         try {
           if ('wakeLock' in navigator && !wakeLock) {
@@ -88,38 +93,76 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
           }
         } catch (_) {}
       }
+      function setWarmingHint() {
+        hint.classList.remove('hidden');
+        hint.textContent = 'Connecting live playback... the stream is warming up.';
+      }
       function playLive() {
         requestWakeLock();
         video.play().catch(function () {});
       }
-      function showError() { hint.textContent = 'Live playback is not available yet. Please try again shortly.'; }
+      function clearRetry() {
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+      }
+      function destroyHls() {
+        if (hls) {
+          try { hls.destroy(); } catch (_) {}
+          hls = null;
+        }
+      }
+      function scheduleRetry() {
+        clearRetry();
+        if (retryCount >= maxRetries) {
+          showError();
+          return;
+        }
+        retryCount += 1;
+        setWarmingHint();
+        retryTimer = setTimeout(start, retryDelayMs);
+      }
+      function showError() {
+        hint.classList.remove('hidden');
+        hint.textContent = 'Live playback is not available yet. Please try again shortly.';
+      }
       function hideHintLater() { setTimeout(function () { hint.classList.add('hidden'); }, 5000); }
       video.addEventListener('playing', hideHintLater);
-      video.addEventListener('error', showError);
+      video.addEventListener('error', scheduleRetry);
       video.addEventListener('click', playLive);
       resume.addEventListener('click', playLive);
       document.addEventListener('visibilitychange', function () {
         if (!document.hidden) playLive();
       });
       if (!src) { showError(); return; }
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = src;
-        playLive();
-        return;
-      }
-      if (window.Hls && window.Hls.isSupported()) {
-        const hls = new window.Hls({ lowLatencyMode: true, liveDurationInfinity: true });
-        hls.on(window.Hls.Events.ERROR, function (_, data) {
-          if (data && data.fatal) showError();
-        });
-        hls.loadSource(src);
-        hls.attachMedia(video);
-        hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+      function start() {
+        clearRetry();
+        destroyHls();
+        setWarmingHint();
+        video.removeAttribute('src');
+        video.load();
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = src;
           playLive();
-        });
-        return;
+          return;
+        }
+        if (window.Hls && window.Hls.isSupported()) {
+          hls = new window.Hls({ lowLatencyMode: true, liveDurationInfinity: true });
+          hls.on(window.Hls.Events.ERROR, function (_, data) {
+            if (data && data.fatal) scheduleRetry();
+          });
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+            retryCount = 0;
+            playLive();
+          });
+          return;
+        }
+        showError();
       }
-      showError();
+      start();
     })();
   </script>
 </body>
