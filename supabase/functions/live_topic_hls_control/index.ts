@@ -11,7 +11,6 @@ const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const MAX_PARTICIPANTS = 4;
 const DAILY_START_TIMEOUT_MS = 10_000;
 const DAILY_STOP_TIMEOUT_MS = 8_000;
-const LIVE_TOPIC_HLS_LAYOUT = { preset: "default", max_cam_streams: 2 };
 
 type LiveTopicRow = {
   id: string;
@@ -285,12 +284,6 @@ function playbackUrlLooksUsable(value: string) {
   return Boolean(extractPlaybackUrl(value));
 }
 
-function dailyStartCanUseConfiguredPlayback(error: unknown) {
-  const diagnostics = safeErrorDiagnostics(error);
-  return diagnostics.daily_status === 400 &&
-    diagnostics.error_message === "invalid-request-error";
-}
-
 async function fetchLiveTopic(
   adminClient: SupabaseClient,
   liveTopicId: string,
@@ -466,7 +459,6 @@ async function callDailyLiveStreaming(params: {
   const requestBody = params.action === "start"
     ? JSON.stringify({
       rtmpUrl: params.rtmpUrl,
-      layout: LIVE_TOPIC_HLS_LAYOUT,
     })
     : undefined;
 
@@ -1036,31 +1028,6 @@ serve(async (req) => {
             });
           } catch (retryError) {
             const retryDiagnostics = safeErrorDiagnostics(retryError);
-            const recoveredPlaybackUrl = playbackUrlFromTemplate(
-              playbackUrlTemplate,
-              roomAccess.topic,
-              roomName,
-            );
-            if (
-              dailyStartCanUseConfiguredPlayback(retryError) &&
-              recoveredPlaybackUrl
-            ) {
-              const updated = await updateTopicHls(adminClient, liveTopicId, {
-                hls_status: "live",
-                hls_playback_url: recoveredPlaybackUrl,
-                hls_started_at: new Date().toISOString(),
-                hls_ended_at: null,
-              });
-              await clearHlsError(adminClient, liveTopicId);
-              return jsonResponse({
-                success: true,
-                live_topic_id: updated.id,
-                hls_status: updated.hls_status ?? "live",
-                hls_playback_url: updated.hls_playback_url ?? "",
-                playback_url_available: true,
-                recovered_from_daily_invalid_request: true,
-              });
-            }
             await updateTopicHls(adminClient, liveTopicId, {
               hls_status: "failed",
               hls_ended_at: null,
@@ -1068,29 +1035,6 @@ serve(async (req) => {
             await persistHlsError(adminClient, liveTopicId, retryDiagnostics);
             throw retryError;
           }
-        }
-
-        const recoveredPlaybackUrl = playbackUrlFromTemplate(
-          playbackUrlTemplate,
-          roomAccess.topic,
-          roomName,
-        );
-        if (dailyStartCanUseConfiguredPlayback(error) && recoveredPlaybackUrl) {
-          const updated = await updateTopicHls(adminClient, liveTopicId, {
-            hls_status: "live",
-            hls_playback_url: recoveredPlaybackUrl,
-            hls_started_at: new Date().toISOString(),
-            hls_ended_at: null,
-          });
-          await clearHlsError(adminClient, liveTopicId);
-          return jsonResponse({
-            success: true,
-            live_topic_id: updated.id,
-            hls_status: updated.hls_status ?? "live",
-            hls_playback_url: updated.hls_playback_url ?? "",
-            playback_url_available: true,
-            recovered_from_daily_invalid_request: true,
-          });
         }
 
         await updateTopicHls(adminClient, liveTopicId, {

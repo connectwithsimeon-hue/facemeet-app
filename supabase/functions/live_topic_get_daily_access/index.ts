@@ -10,7 +10,6 @@ const corsHeaders = {
 const MAX_PARTICIPANTS = 4;
 const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const DAILY_HLS_START_TIMEOUT_MS = 10_000;
-const LIVE_TOPIC_HLS_LAYOUT = { preset: "default", max_cam_streams: 2 };
 
 type LiveTopicRow = {
   id: string;
@@ -215,11 +214,6 @@ function rtmpUrlLooksUsable(value: string) {
 
 function playbackUrlLooksUsable(value: string) {
   return Boolean(extractPlaybackUrl(value));
-}
-
-function dailyStartCanUseConfiguredPlayback(status: number, bodyText: string) {
-  return status === 400 &&
-    safeDailyProviderMessage(bodyText) === "invalid-request-error";
 }
 
 function logSafe(event: string, data: Record<string, unknown>) {
@@ -602,7 +596,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
           Authorization: `Bearer ${params.dailyApiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ rtmpUrl, layout: LIVE_TOPIC_HLS_LAYOUT }),
+        body: JSON.stringify({ rtmpUrl }),
         signal: controller.signal,
       },
     );
@@ -685,7 +679,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
             Authorization: `Bearer ${params.dailyApiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ rtmpUrl, layout: LIVE_TOPIC_HLS_LAYOUT }),
+          body: JSON.stringify({ rtmpUrl }),
           signal: retryController.signal,
         },
       );
@@ -715,17 +709,6 @@ async function ensureHlsStartedFromDailyAccess(params: {
       }
     }
     if (!response.ok) {
-      if (
-        dailyStartCanUseConfiguredPlayback(response.status, retryBodyText) &&
-        playbackUsable
-      ) {
-        await persistHlsDiagnostic(params.adminClient, params.topic.id, {
-          status: "live",
-          playbackUrl,
-          started: true,
-        });
-        return;
-      }
       await persistHlsDiagnostic(params.adminClient, params.topic.id, {
         status: "failed",
         errorCode: "daily_start_failed",
@@ -745,17 +728,6 @@ async function ensureHlsStartedFromDailyAccess(params: {
   }
 
   if (!response.ok) {
-    if (
-      dailyStartCanUseConfiguredPlayback(response.status, bodyText) &&
-      playbackUsable
-    ) {
-      await persistHlsDiagnostic(params.adminClient, params.topic.id, {
-        status: "live",
-        playbackUrl,
-        started: true,
-      });
-      return;
-    }
     await persistHlsDiagnostic(params.adminClient, params.topic.id, {
       status: "failed",
       errorCode: "daily_start_failed",
