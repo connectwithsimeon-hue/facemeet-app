@@ -316,6 +316,28 @@ async function createDailyRoom(params: {
   return { roomUrl: data.url, roomName: data.name };
 }
 
+async function fetchDailyRoom(params: {
+  dailyApiKey: string;
+  roomName: string;
+}) {
+  const response = await fetch(
+    `https://api.daily.co/v1/rooms/${encodeURIComponent(params.roomName)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${params.dailyApiKey}`,
+      },
+    },
+  );
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("daily_room_lookup_failed");
+
+  const data = await response.json() as { url?: string; name?: string };
+  if (!data.url || !data.name) throw new Error("daily_room_lookup_failed");
+  return { roomUrl: data.url, roomName: data.name };
+}
+
 async function createDailyMeetingToken(params: {
   dailyApiKey: string;
   roomName: string;
@@ -403,12 +425,46 @@ async function ensureDailyRoom(params: {
       : "");
 
   if (params.topic.daily_room_url && existingRoomName) {
-    return {
-      topic: params.topic,
-      roomUrl: params.topic.daily_room_url,
+    const existingRoom = await fetchDailyRoom({
+      dailyApiKey: params.dailyApiKey,
       roomName: existingRoomName,
-      roomExpiresAt: roomExpiresAtIso(params.topic),
-    };
+    });
+
+    if (existingRoom) {
+      if (
+        existingRoom.roomUrl !== params.topic.daily_room_url ||
+        existingRoom.roomName !== params.topic.daily_room_name
+      ) {
+        const { data, error } = await params.adminClient
+          .from("live_topics")
+          .update({
+            daily_room_url: existingRoom.roomUrl,
+            daily_room_name: existingRoom.roomName,
+          })
+          .eq("id", params.topic.id)
+          .eq("status", "live")
+          .select(
+            "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers,hls_status,hls_playback_url,hls_started_at,hls_ended_at",
+          )
+          .single();
+
+        if (error) throw new Error("daily_room_reuse_failed");
+
+        return {
+          topic: data as LiveTopicRow,
+          roomUrl: existingRoom.roomUrl,
+          roomName: existingRoom.roomName,
+          roomExpiresAt: roomExpiresAtIso(data as LiveTopicRow),
+        };
+      }
+
+      return {
+        topic: params.topic,
+        roomUrl: existingRoom.roomUrl,
+        roomName: existingRoom.roomName,
+        roomExpiresAt: roomExpiresAtIso(params.topic),
+      };
+    }
   }
 
   const roomExpiresAt = roomExpiresAtIso(params.topic);
