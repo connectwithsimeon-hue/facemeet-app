@@ -537,6 +537,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
 
     await _setLiveTopicWakeLock(true);
 
+    _ensureHlsPlaybackStarted();
+
     if ((_dailyRoomUrl?.isNotEmpty ?? false) &&
         (_dailyMeetingToken?.isNotEmpty ?? false)) {
       return;
@@ -586,6 +588,21 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
         _isLoadingDailyAccess = false;
       });
     }
+  }
+
+  void _ensureHlsPlaybackStarted() {
+    final topic = _liveTopic;
+    final status = topic?['status']?.toString();
+    final hlsStatus = topic?['hls_status']?.toString();
+    if (!_isHostOrCohost ||
+        status != 'live' ||
+        hlsStatus == 'live' ||
+        hlsStatus == 'pending' ||
+        _isStartingHls) {
+      return;
+    }
+
+    unawaited(_startHlsPlayback(force: true));
   }
 
   Future<void> _startHlsPlayback({bool force = false}) async {
