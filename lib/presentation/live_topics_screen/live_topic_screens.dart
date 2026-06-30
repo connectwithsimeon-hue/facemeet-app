@@ -297,6 +297,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   bool _isCameraOff = false;
   bool _isLoadingAudienceAccess = false;
   bool _isStartingHls = false;
+  DateTime? _lastHlsStartAttemptAt;
+  DateTime? _lastHlsFailureSnackAt;
   Map<String, dynamic>? _audienceAccess;
 
   @override
@@ -594,11 +596,16 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     final topic = _liveTopic;
     final status = topic?['status']?.toString();
     final hlsStatus = topic?['hls_status']?.toString();
+    final lastAttempt = _lastHlsStartAttemptAt;
+    final isRetryCoolingDown =
+        lastAttempt != null &&
+        DateTime.now().difference(lastAttempt) < const Duration(seconds: 20);
     if (!_isHostOrCohost ||
         status != 'live' ||
         hlsStatus == 'live' ||
         hlsStatus == 'pending' ||
-        _isStartingHls) {
+        _isStartingHls ||
+        isRetryCoolingDown) {
       return;
     }
 
@@ -620,6 +627,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     }
 
     _isStartingHls = true;
+    _lastHlsStartAttemptAt = DateTime.now();
     try {
       final result = await DailyService.instance.controlLiveTopicHls(
         liveTopicId: id,
@@ -639,10 +647,21 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       }
     } catch (error) {
       debugPrint('LIVE TOPIC HLS: start failed safely — $error');
-      if (mounted) _showSnack('Live playback could not start yet.');
+      _showHlsFailureSnack();
     } finally {
       _isStartingHls = false;
     }
+  }
+
+  void _showHlsFailureSnack() {
+    if (!mounted) return;
+    final lastShown = _lastHlsFailureSnackAt;
+    if (lastShown != null &&
+        DateTime.now().difference(lastShown) < const Duration(seconds: 45)) {
+      return;
+    }
+    _lastHlsFailureSnackAt = DateTime.now();
+    _showSnack('Live playback could not start yet.');
   }
 
   Future<void> _stopHlsPlayback() async {
