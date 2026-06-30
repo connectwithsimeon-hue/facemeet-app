@@ -191,13 +191,25 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: controller.value.aspectRatio == 0
-                    ? 16 / 9
-                    : controller.value.aspectRatio,
-                child: VideoPlayer(controller),
-              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final videoSize = controller.value.size;
+                final videoWidth = videoSize.width == 0
+                    ? constraints.maxWidth
+                    : videoSize.width;
+                final videoHeight = videoSize.height == 0
+                    ? constraints.maxHeight
+                    : videoSize.height;
+                return FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: videoWidth,
+                    height: videoHeight,
+                    child: VideoPlayer(controller),
+                  ),
+                );
+              },
             ),
             Positioned(
               left: 16,

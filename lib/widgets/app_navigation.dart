@@ -5,14 +5,16 @@ import 'package:google_fonts/google_fonts.dart';
 const int discoverTabIndex = 0;
 const int sparksTabIndex = 1;
 const int eventsTabIndex = 2;
-const int chatsTabIndex = 3;
-const int profileTabIndex = 4;
+const int liveTabIndex = 3;
+const int chatsTabIndex = 4;
+const int profileTabIndex = 5;
 
 class AppNavigation extends StatelessWidget {
   final int currentIndex;
   final Function(int) onTap;
   final int sessionsBadge;
   final int chatBadge;
+  final bool hasLiveTopics;
 
   const AppNavigation({
     super.key,
@@ -20,6 +22,7 @@ class AppNavigation extends StatelessWidget {
     required this.onTap,
     this.sessionsBadge = 0,
     this.chatBadge = 0,
+    this.hasLiveTopics = false,
   });
 
   @override
@@ -69,6 +72,16 @@ class AppNavigation extends StatelessWidget {
                 ),
                 Expanded(
                   child: _NavItem(
+                    icon: Icons.podcasts_outlined,
+                    activeIcon: Icons.podcasts_rounded,
+                    label: 'Live',
+                    isActive: currentIndex == liveTabIndex,
+                    onTap: () => onTap(liveTabIndex),
+                    liveGlow: hasLiveTopics,
+                  ),
+                ),
+                Expanded(
+                  child: _NavItem(
                     icon: Icons.chat_bubble_outline_rounded,
                     activeIcon: Icons.chat_bubble_rounded,
                     label: 'Chat',
@@ -102,6 +115,7 @@ class _NavItem extends StatefulWidget {
   final bool isActive;
   final VoidCallback onTap;
   final int? badge;
+  final bool liveGlow;
 
   const _NavItem({
     required this.icon,
@@ -110,6 +124,7 @@ class _NavItem extends StatefulWidget {
     required this.isActive,
     required this.onTap,
     this.badge,
+    this.liveGlow = false,
   });
 
   @override
@@ -158,6 +173,8 @@ class _NavItemState extends State<_NavItem>
           decoration: BoxDecoration(
             color: widget.isActive
                 ? const Color(0x33E8503A)
+                : widget.liveGlow
+                ? const Color(0x1FE8503A)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(24),
           ),
@@ -197,6 +214,28 @@ class _NavItemState extends State<_NavItem>
                         ),
                       ),
                     ),
+                  if (widget.liveGlow && widget.badge == null)
+                    Positioned(
+                      right: -3,
+                      top: -2,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8503A),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(
+                                0xFFE8503A,
+                              ).withValues(alpha: 0.8),
+                              blurRadius: 10,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 3),
@@ -224,11 +263,13 @@ class _NavItemState extends State<_NavItem>
 class AppNavigationRail extends StatelessWidget {
   final int currentIndex;
   final Function(int) onTap;
+  final bool hasLiveTopics;
 
   const AppNavigationRail({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.hasLiveTopics = false,
   });
 
   @override
@@ -256,27 +297,67 @@ class AppNavigationRail extends StatelessWidget {
         fontWeight: FontWeight.w400,
         color: const Color(0x66FFFFFF),
       ),
-      destinations: const [
-        NavigationRailDestination(
+      destinations: [
+        const NavigationRailDestination(
           icon: Icon(Icons.explore_rounded),
           label: Text('Discover'),
         ),
-        NavigationRailDestination(
+        const NavigationRailDestination(
           icon: Icon(Icons.bolt_rounded),
           label: Text('Sparks'),
         ),
-        NavigationRailDestination(
+        const NavigationRailDestination(
           icon: Icon(Icons.event_rounded),
           label: Text('Events'),
         ),
         NavigationRailDestination(
+          icon: _RailLiveIcon(isLive: hasLiveTopics),
+          label: const Text('Live'),
+        ),
+        const NavigationRailDestination(
           icon: Icon(Icons.chat_bubble_rounded),
           label: Text('Chats'),
         ),
-        NavigationRailDestination(
+        const NavigationRailDestination(
           icon: Icon(Icons.person_rounded),
           label: Text('Profile'),
         ),
+      ],
+    );
+  }
+}
+
+class _RailLiveIcon extends StatelessWidget {
+  final bool isLive;
+
+  const _RailLiveIcon({required this.isLive});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        const Icon(Icons.podcasts_rounded),
+        if (isLive)
+          Positioned(
+            right: -3,
+            top: -2,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8503A),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFE8503A).withValues(alpha: 0.8),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }

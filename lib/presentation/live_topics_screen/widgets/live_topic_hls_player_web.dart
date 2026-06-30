@@ -57,7 +57,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     .wrap { position: relative; width: 100%; height: 100%; background: #000; }
-    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    video { width: 100%; height: 100%; object-fit: cover; background: #000; }
     .badge { position: absolute; left: 14px; top: 14px; padding: 8px 11px; border-radius: 999px; background: rgba(0,0,0,.58); color: white; font: 800 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; border: 1px solid rgba(255,255,255,.14); }
     .badge::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 99px; background: #ef4d3f; }
     .resume { position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.62); color: white; font: 800 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; }

@@ -18,6 +18,7 @@ class ProfileVideoHeroWidget extends StatefulWidget {
   final String city;
   final bool isVerified;
   final VoidCallback? onVideoUpdated;
+  final VoidCallback? onSettingsTap;
 
   const ProfileVideoHeroWidget({
     super.key,
@@ -27,6 +28,7 @@ class ProfileVideoHeroWidget extends StatefulWidget {
     required this.city,
     required this.isVerified,
     this.onVideoUpdated,
+    this.onSettingsTap,
   });
 
   @override
@@ -321,22 +323,25 @@ class _ProfileVideoHeroWidgetState extends State<ProfileVideoHeroWidget>
                         color: Colors.white,
                       ),
                     ),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: AppTheme.surfaceGlass,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTheme.borderGlass),
-                          ),
-                          child: const Icon(
-                            Icons.settings_rounded,
-                            color: Colors.white,
-                            size: 18,
+                    GestureDetector(
+                      onTap: widget.onSettingsTap,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceGlass,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.borderGlass),
+                            ),
+                            child: const Icon(
+                              Icons.settings_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
                           ),
                         ),
                       ),

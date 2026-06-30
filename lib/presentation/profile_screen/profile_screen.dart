@@ -1039,6 +1039,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               city: city,
               isVerified: isVerified,
               onVideoUpdated: _refreshProfile,
+              onSettingsTap: () => _openSettings(profile),
             ),
           ),
           Expanded(
@@ -1065,6 +1066,7 @@ class ProfileScreenState extends State<ProfileScreen> {
             city: city,
             isVerified: isVerified,
             onVideoUpdated: _refreshProfile,
+            onSettingsTap: () => _openSettings(profile),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),

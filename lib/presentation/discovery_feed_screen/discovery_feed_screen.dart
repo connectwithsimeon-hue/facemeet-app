@@ -30,8 +30,6 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
 
   bool _isLoading = true;
   List<Map<String, dynamic>> _profiles = [];
-  List<Map<String, dynamic>> _liveNowTopics = [];
-  bool _hasUpcomingEvents = false;
   String _selectedIntentFilter = 'all';
   String _viewerConnectionIntent = SupabaseService.defaultConnectionIntent;
 
@@ -71,24 +69,15 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
           _isFilterAllowedForViewer(_selectedIntentFilter, viewerIntent)
           ? _selectedIntentFilter
           : 'all';
-      final results = await Future.wait([
-        SupabaseService.instance.getDiscoveryFeed(
-          connectionIntentFilter: _effectiveIntentFilterForViewer(
-            nextSelectedFilter,
-            viewerIntent,
-          ),
+      final profiles = await SupabaseService.instance.getDiscoveryFeed(
+        connectionIntentFilter: _effectiveIntentFilterForViewer(
+          nextSelectedFilter,
+          viewerIntent,
         ),
-        SupabaseService.instance.getMyAccessibleEvents(),
-        SupabaseService.instance.listLiveNowTopics(),
-      ]);
-      final profiles = List<Map<String, dynamic>>.from(results[0] as List);
-      final events = List<Map<String, dynamic>>.from(results[1] as List);
-      final liveNowTopics = List<Map<String, dynamic>>.from(results[2] as List);
+      );
       if (mounted) {
         setState(() {
           _profiles = profiles;
-          _liveNowTopics = liveNowTopics;
-          _hasUpcomingEvents = events.isNotEmpty;
           _viewerConnectionIntent = viewerIntent;
           _selectedIntentFilter = nextSelectedFilter;
           _currentCardIndex = 0;
@@ -713,72 +702,11 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
         ),
         const SizedBox(height: 12),
         _buildTopActionRow(),
-        if (_liveNowTopics.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _buildLiveNowStrip(),
-        ],
         const SizedBox(height: 12),
         // Card stack
         Expanded(child: Center(child: _buildCardArea(size, isTablet))),
         SizedBox(height: isTablet ? 16 : 90),
       ],
-    );
-  }
-
-  Widget _buildCompactEventsAction() {
-    return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, AppRoutes.eventsScreen),
-      child: Container(
-        height: 38,
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceGlass,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: AppTheme.borderGlass),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.event_available_rounded,
-              color: AppTheme.primary,
-              size: 16,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Events',
-              style: GoogleFonts.dmSans(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLiveNowStrip() {
-    return SizedBox(
-      height: 126,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        scrollDirection: Axis.horizontal,
-        itemBuilder: (context, index) {
-          final topic = _liveNowTopics[index];
-          return _LiveNowTopicCard(
-            topic: topic,
-            onTap: () => Navigator.pushNamed(
-              context,
-              AppRoutes.liveTopicDetailScreen,
-              arguments: {'liveTopic': topic},
-            ),
-          );
-        },
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemCount: _liveNowTopics.length,
-      ),
     );
   }
 
@@ -895,27 +823,13 @@ class _DiscoveryFeedScreenState extends State<DiscoveryFeedScreen>
     final filters = _availableIntentFiltersForViewer(_viewerConnectionIntent);
     final showFilters = filters.length > 1;
 
-    if (!showFilters && !_hasUpcomingEvents) {
+    if (!showFilters) {
       return const SizedBox.shrink();
     }
 
     return SizedBox(
       height: 38,
-      child: Row(
-        children: [
-          if (showFilters)
-            Expanded(child: _buildIntentFilterRow(filters))
-          else
-            const Spacer(),
-          if (_hasUpcomingEvents) ...[
-            const SizedBox(width: 8),
-            Padding(
-              padding: const EdgeInsets.only(right: 20),
-              child: _buildCompactEventsAction(),
-            ),
-          ],
-        ],
-      ),
+      child: Row(children: [Expanded(child: _buildIntentFilterRow(filters))]),
     );
   }
 
@@ -1109,152 +1023,6 @@ class _IntentFilterChip extends StatelessWidget {
             fontWeight: FontWeight.w800,
             color: isSelected ? Colors.white : AppTheme.textSecondary,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LiveNowTopicCard extends StatelessWidget {
-  final Map<String, dynamic> topic;
-  final VoidCallback onTap;
-
-  const _LiveNowTopicCard({required this.topic, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final title = topic['title']?.toString() ?? 'Live Topic';
-    final host = topic['host_profile'] is Map
-        ? (topic['host_profile']['first_name']?.toString() ?? 'Host')
-        : 'Host';
-    final cohost = topic['cohost_profile'] is Map
-        ? (topic['cohost_profile']['first_name']?.toString() ?? '')
-        : '';
-    final freeSeats = ((topic['free_seats_remaining'] as num?)?.toInt() ?? 0)
-        .clamp(0, 20);
-    final hlsReady =
-        (topic['hls_playback_url']?.toString().trim().isNotEmpty ?? false) &&
-        topic['hls_status'] == 'live';
-    final cta = hlsReady ? 'Watch Live' : 'View Live Topic';
-    final gateLabel = freeSeats > 0
-        ? '$freeSeats free seats left'
-        : '1 Spark to watch';
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 292,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF2A1115), Color(0xFF161316)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppTheme.borderGlass),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.14),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.34),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Live Now',
-                        style: GoogleFonts.dmSans(
-                          color: AppTheme.primary,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  gateLabel,
-                  style: GoogleFonts.dmSans(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.dmSans(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-                height: 1.1,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              cohost.trim().isEmpty ? host : '$host + $cohost',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.dmSans(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Text(
-                  cta,
-                  style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(
-                  Icons.arrow_forward_rounded,
-                  color: AppTheme.primary,
-                  size: 16,
-                ),
-              ],
-            ),
-          ],
         ),
       ),
     );

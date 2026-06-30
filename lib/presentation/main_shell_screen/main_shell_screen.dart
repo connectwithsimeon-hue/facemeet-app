@@ -17,6 +17,7 @@ import '../../routes/app_routes.dart';
 import '../chat_screen/chat_screen.dart';
 import '../discovery_feed_screen/discovery_feed_screen.dart';
 import '../events_screen/events_screen.dart';
+import '../live_topics_screen/live_topic_screens.dart';
 import '../profile_screen/profile_screen.dart';
 import '../spark_session_screen/sparks_screen.dart';
 import '../spark_session_screen/widgets/spark_schedule_sheet.dart';
@@ -56,6 +57,7 @@ class MainShellScreenState extends State<MainShellScreen>
       onNavigateToDiscover: () => _onTap(discoverTabIndex),
     ),
     const EventsScreen(),
+    const LiveTopicsScreen(),
     ChatScreen(
       key: _chatKey,
       initialMatchId: widget.chatMatchId,
@@ -74,6 +76,7 @@ class MainShellScreenState extends State<MainShellScreen>
   // Auto-reconnect timer
   Timer? _reconnectTimer;
   Timer? _liveTopicInviteTimer;
+  Timer? _liveTopicBadgeTimer;
   bool _matchesChannelActive = false;
 
   // Pending matches badge count (Sessions tab)
@@ -81,6 +84,7 @@ class MainShellScreenState extends State<MainShellScreen>
 
   // Chat tab unread message badge count
   int _chatUnreadCount = 0;
+  int _liveTopicCount = 0;
 
   // Overlay entry for full-screen match modal
   OverlayEntry? _matchOverlayEntry;
@@ -106,6 +110,7 @@ class MainShellScreenState extends State<MainShellScreen>
     _subscribeToPendingMatchCount();
     _startReconnectWatcher();
     _startLiveTopicInviteWatcher();
+    _startLiveTopicBadgeWatcher();
     _initNotificationService();
     _loadChatUnreadCount();
     _externalReturnRepairSubscription = ExternalReturnRepairService.events
@@ -311,6 +316,23 @@ class MainShellScreenState extends State<MainShellScreen>
     _liveTopicInviteTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       unawaited(_checkPendingLiveTopicInvite());
     });
+  }
+
+  void _startLiveTopicBadgeWatcher() {
+    unawaited(_loadLiveTopicCount());
+    _liveTopicBadgeTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_loadLiveTopicCount());
+    });
+  }
+
+  Future<void> _loadLiveTopicCount() async {
+    try {
+      final topics = await SupabaseService.instance.listLiveNowTopics();
+      if (!mounted) return;
+      setState(() => _liveTopicCount = topics.length);
+    } catch (e) {
+      debugPrint('LIVE TOPIC BADGE: skipped — $e');
+    }
   }
 
   Future<void> _checkPendingLiveTopicInvite() async {
@@ -920,6 +942,7 @@ class MainShellScreenState extends State<MainShellScreen>
     WidgetsBinding.instance.removeObserver(this);
     _reconnectTimer?.cancel();
     _liveTopicInviteTimer?.cancel();
+    _liveTopicBadgeTimer?.cancel();
     _matchesChannel?.unsubscribe();
     _pendingMatchesChannel?.unsubscribe();
     _repeatSparkSessionsChannel?.unsubscribe();
@@ -1073,6 +1096,7 @@ class MainShellScreenState extends State<MainShellScreen>
                     AppNavigationRail(
                       currentIndex: _currentIndex,
                       onTap: _onTap,
+                      hasLiveTopics: _liveTopicCount > 0,
                     ),
                     const VerticalDivider(
                       width: 1,
@@ -1100,6 +1124,7 @@ class MainShellScreenState extends State<MainShellScreen>
                           onTap: _onTap,
                           sessionsBadge: _pendingMatchCount,
                           chatBadge: _chatUnreadCount,
+                          hasLiveTopics: _liveTopicCount > 0,
                         ),
                       ),
                     ),
