@@ -392,6 +392,18 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     return stageStatus == 'joined';
   }
 
+  bool get _hasAudienceWatchAccess {
+    if (_isHostOrCohost) return false;
+    final accessType =
+        _audienceAccess?['access_type']?.toString().trim() ??
+        _liveTopic?['viewer_access_type']?.toString().trim() ??
+        '';
+    return _audienceAccess?['access_granted'] == true || accessType.isNotEmpty;
+  }
+
+  bool get _canRequestHlsPlaybackStart =>
+      _isHostOrCohost || _hasAudienceWatchAccess;
+
   bool get _isApprovedUnpaidSpeaker {
     if (_isHostOrCohost) return false;
     final requestStatus = _liveTopic?['viewer_request_status']?.toString();
@@ -532,14 +544,14 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       await _loadAudienceAccess(pay: false, silent: true);
     }
 
+    _ensureHlsPlaybackStarted();
+
     if (!_canUseDailyStage || status != 'live') {
       await _setLiveTopicWakeLock(false);
       return;
     }
 
     await _setLiveTopicWakeLock(true);
-
-    _ensureHlsPlaybackStarted();
 
     if ((_dailyRoomUrl?.isNotEmpty ?? false) &&
         (_dailyMeetingToken?.isNotEmpty ?? false)) {
@@ -600,7 +612,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     final isRetryCoolingDown =
         lastAttempt != null &&
         DateTime.now().difference(lastAttempt) < const Duration(seconds: 20);
-    if (!_isHostOrCohost ||
+    if (!_canRequestHlsPlaybackStart ||
         status != 'live' ||
         hlsStatus == 'live' ||
         hlsStatus == 'pending' ||
@@ -618,7 +630,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     final status = topic?['status']?.toString();
     final hlsStatus = topic?['hls_status']?.toString();
     if (id.isEmpty ||
-        !_isHostOrCohost ||
+        !_canRequestHlsPlaybackStart ||
         status != 'live' ||
         _isStartingHls ||
         hlsStatus == 'live' ||

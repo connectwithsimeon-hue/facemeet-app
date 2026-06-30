@@ -301,6 +301,30 @@ async function fetchLiveTopic(
   return data as LiveTopicRow;
 }
 
+async function userHasLiveTopicViewerAccess(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+  userId: string,
+) {
+  const { data, error } = await adminClient
+    .from("live_topic_viewers")
+    .select("id")
+    .eq("live_topic_id", liveTopicId)
+    .eq("user_id", userId)
+    .not("access_type", "is", null)
+    .maybeSingle();
+
+  if (error) {
+    logSafe("live_topic_hls_viewer_access_lookup_failed", {
+      live_topic_id: liveTopicId,
+      error_code: "viewer_access_lookup_failed",
+    });
+    return false;
+  }
+
+  return Boolean(data?.id);
+}
+
 function resolveRoomName(topic: LiveTopicRow) {
   const roomName = normalizeString(topic.daily_room_name) ||
     (topic.daily_room_url ? roomNameFromUrl(topic.daily_room_url) ?? "" : "");
@@ -660,15 +684,19 @@ serve(async (req) => {
     const callerUserId = authData.user.id;
     const isHostOrCohost =
       topic.creator_user_id === callerUserId || topic.cohost_user_id === callerUserId;
+    const hasViewerAccess = action === "start" && !isHostOrCohost
+      ? await userHasLiveTopicViewerAccess(adminClient, liveTopicId, callerUserId)
+      : false;
     logSafe("live_topic_hls_request", {
       action,
       live_topic_id: liveTopicId,
-      authorized: isHostOrCohost,
+      authorized: isHostOrCohost || hasViewerAccess,
+      authorized_as_viewer: hasViewerAccess,
       room_name_present: Boolean(topic.daily_room_name),
       room_url_present: Boolean(topic.daily_room_url),
       hls_status: topic.hls_status ?? "not_started",
     });
-    if (!isHostOrCohost) {
+    if (!isHostOrCohost && !hasViewerAccess) {
       const error = makeHlsError("unauthorized_user");
       await persistHlsError(adminClient, liveTopicId, safeErrorDiagnostics(error));
       throw error;
