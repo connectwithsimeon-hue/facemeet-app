@@ -216,6 +216,11 @@ function playbackUrlLooksUsable(value: string) {
   return Boolean(extractPlaybackUrl(value));
 }
 
+function dailyStartCanUseConfiguredPlayback(status: number, bodyText: string) {
+  return status === 400 &&
+    safeDailyProviderMessage(bodyText) === "invalid-request-error";
+}
+
 function logSafe(event: string, data: Record<string, unknown>) {
   console.log(JSON.stringify({ event, ...data }));
 }
@@ -709,6 +714,17 @@ async function ensureHlsStartedFromDailyAccess(params: {
       }
     }
     if (!response.ok) {
+      if (
+        dailyStartCanUseConfiguredPlayback(response.status, retryBodyText) &&
+        playbackUsable
+      ) {
+        await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+          status: "live",
+          playbackUrl,
+          started: true,
+        });
+        return;
+      }
       await persistHlsDiagnostic(params.adminClient, params.topic.id, {
         status: "failed",
         errorCode: "daily_start_failed",
@@ -728,6 +744,17 @@ async function ensureHlsStartedFromDailyAccess(params: {
   }
 
   if (!response.ok) {
+    if (
+      dailyStartCanUseConfiguredPlayback(response.status, bodyText) &&
+      playbackUsable
+    ) {
+      await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+        status: "live",
+        playbackUrl,
+        started: true,
+      });
+      return;
+    }
     await persistHlsDiagnostic(params.adminClient, params.topic.id, {
       status: "failed",
       errorCode: "daily_start_failed",
