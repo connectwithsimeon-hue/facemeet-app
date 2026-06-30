@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../routes/app_routes.dart';
 import '../../services/daily_service.dart';
 import '../../services/supabase_service.dart';
+import '../spark_session_screen/widgets/spark_video_webview_stub.dart'
+    if (dart.library.io) '../spark_session_screen/widgets/spark_video_webview_native.dart';
+import 'widgets/live_topic_hls_player.dart';
 import '../../theme/app_theme.dart';
 import '../../services/daily_call_web.dart'
     if (dart.library.io) '../../services/daily_call_io.dart';
@@ -281,6 +283,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   Timer? _statusRefreshTimer;
   final GlobalKey<DailyCallViewState> _dailyCallKey =
       GlobalKey<DailyCallViewState>();
+  final GlobalKey<SparkVideoWebViewState> _webDailyCallKey =
+      GlobalKey<SparkVideoWebViewState>();
   bool _isBusy = false;
   bool _isLoading = true;
   bool _isLoadingDailyAccess = false;
@@ -470,8 +474,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       );
       if (!mounted) return;
       setState(() => _liveTopic = updated);
-      await _load(silent: true);
       await _startHlsPlayback(force: true);
+      await _load(silent: true);
     } catch (error) {
       debugPrint('LIVE TOPIC: start failed — $error');
       await _load(silent: true);
@@ -526,7 +530,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       await _loadAudienceAccess(pay: false, silent: true);
     }
 
-    if (kIsWeb || !_canUseDailyStage || status != 'live') {
+    if (!_canUseDailyStage || status != 'live') {
       await _setLiveTopicWakeLock(false);
       return;
     }
@@ -543,7 +547,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
 
   Future<void> _loadDailyAccess({bool force = false}) async {
     final id = _liveTopic?['id']?.toString();
-    if (id == null || id.isEmpty || kIsWeb || !_canUseDailyStage) return;
+    if (id == null || id.isEmpty || !_canUseDailyStage) return;
     if (_isLoadingDailyAccess) return;
     if (!force &&
         (_dailyRoomUrl?.isNotEmpty ?? false) &&
@@ -666,7 +670,11 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
 
   Future<void> _leaveDailyCall() async {
     try {
-      await _dailyCallKey.currentState?.leave();
+      if (kIsWeb) {
+        await _webDailyCallKey.currentState?.leaveCall();
+      } else {
+        await _dailyCallKey.currentState?.leave();
+      }
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: leave failed safely — $error');
     }
@@ -690,9 +698,13 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   Future<void> _toggleLiveTopicMute() async {
     final nextMuted = !_isMuted;
     try {
-      final dailyState = _dailyCallKey.currentState;
-      if (dailyState == null) throw StateError('Daily call is not ready');
-      await dailyState.setMuted(nextMuted);
+      if (kIsWeb) {
+        _webDailyCallKey.currentState?.sendToggleMuteCommand();
+      } else {
+        final dailyState = _dailyCallKey.currentState;
+        if (dailyState == null) throw StateError('Daily call is not ready');
+        await dailyState.setMuted(nextMuted);
+      }
       if (mounted) setState(() => _isMuted = nextMuted);
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: mute toggle failed — $error');
@@ -703,9 +715,13 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   Future<void> _toggleLiveTopicCamera() async {
     final nextCameraOff = !_isCameraOff;
     try {
-      final dailyState = _dailyCallKey.currentState;
-      if (dailyState == null) throw StateError('Daily call is not ready');
-      await dailyState.setCameraOff(nextCameraOff);
+      if (kIsWeb) {
+        _webDailyCallKey.currentState?.sendToggleCameraCommand();
+      } else {
+        final dailyState = _dailyCallKey.currentState;
+        if (dailyState == null) throw StateError('Daily call is not ready');
+        await dailyState.setCameraOff(nextCameraOff);
+      }
       if (mounted) setState(() => _isCameraOff = nextCameraOff);
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: camera toggle failed — $error');
@@ -1050,6 +1066,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                         roomUrl: _dailyRoomUrl,
                         meetingToken: _dailyMeetingToken,
                         dailyCallKey: _dailyCallKey,
+                        webDailyCallKey: _webDailyCallKey,
                         onRetry: () => _loadDailyAccess(force: true),
                         onEnded: () => unawaited(_handleDailyCallEnded()),
                         onRefreshDailyAccess: _refreshDailyAccess,
@@ -1832,6 +1849,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
   final String? roomUrl;
   final String? meetingToken;
   final GlobalKey<DailyCallViewState> dailyCallKey;
+  final GlobalKey<SparkVideoWebViewState> webDailyCallKey;
   final VoidCallback onRetry;
   final VoidCallback onEnded;
   final Future<Map<String, String>?> Function() onRefreshDailyAccess;
@@ -1849,6 +1867,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
     required this.roomUrl,
     required this.meetingToken,
     required this.dailyCallKey,
+    required this.webDailyCallKey,
     required this.onRetry,
     required this.onEnded,
     required this.onRefreshDailyAccess,
@@ -1867,15 +1886,6 @@ class _LiveTopicVideoStage extends StatelessWidget {
         title: 'This Live Topic is live',
         body:
             'Viewer mode is coming next. Hosts and co-hosts are on video now.',
-      );
-    }
-
-    if (isWeb) {
-      return const _VideoPlaceholderCard(
-        icon: Icons.desktop_windows_rounded,
-        title: 'Live Topic video is ready on mobile',
-        body:
-            'Host and co-host video is available in the iOS and Android app. PWA video support is coming next.',
       );
     }
 
@@ -1922,14 +1932,26 @@ class _LiveTopicVideoStage extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            DailyCallView(
-              key: dailyCallKey,
-              roomUrl: safeRoomUrl,
-              meetingToken: safeMeetingToken,
-              onCallEnded: onEnded,
-              onCallError: (_) {},
-              onRefreshDailyAccess: onRefreshDailyAccess,
-            ),
+            if (isWeb)
+              SparkVideoWebView(
+                key: webDailyCallKey,
+                roomUrl: safeRoomUrl,
+                meetingToken: safeMeetingToken,
+                onConnected: () {},
+                onEndRequested: onEnded,
+                onMuteChanged: (_) {},
+                onCameraChanged: (_) {},
+                onError: (_) {},
+              )
+            else
+              DailyCallView(
+                key: dailyCallKey,
+                roomUrl: safeRoomUrl,
+                meetingToken: safeMeetingToken,
+                onCallEnded: onEnded,
+                onCallError: (_) {},
+                onRefreshDailyAccess: onRefreshDailyAccess,
+              ),
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -2200,128 +2222,14 @@ class _LiveTopicAudienceCard extends StatelessWidget {
   }
 }
 
-class _HlsPlaybackCard extends StatefulWidget {
+class _HlsPlaybackCard extends StatelessWidget {
   final String hlsUrl;
 
   const _HlsPlaybackCard({required this.hlsUrl});
 
   @override
-  State<_HlsPlaybackCard> createState() => _HlsPlaybackCardState();
-}
-
-class _HlsPlaybackCardState extends State<_HlsPlaybackCard> {
-  VideoPlayerController? _controller;
-  bool _isInitializing = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  @override
-  void didUpdateWidget(covariant _HlsPlaybackCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.hlsUrl != widget.hlsUrl) {
-      _controller?.dispose();
-      _controller = null;
-      _isInitializing = true;
-      _error = null;
-      _init();
-    }
-  }
-
-  Future<void> _init() async {
-    try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(widget.hlsUrl),
-      );
-      _controller = controller;
-      await controller.initialize();
-      await controller.setVolume(1);
-      if (!mounted) return;
-      setState(() => _isInitializing = false);
-    } catch (error) {
-      debugPrint('LIVE TOPIC HLS: playback init failed — $error');
-      if (!mounted) return;
-      setState(() {
-        _isInitializing = false;
-        _error = 'Live playback is not available on this device yet.';
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    if (_isInitializing) {
-      return const _VideoPlaceholderCard(
-        icon: Icons.play_circle_rounded,
-        title: 'Loading live playback...',
-        body: 'Preparing the live conversation stream.',
-        showSpinner: true,
-      );
-    }
-
-    if (_error != null ||
-        controller == null ||
-        !controller.value.isInitialized) {
-      return _VideoPlaceholderCard(
-        icon: Icons.live_tv_rounded,
-        title: 'Playback unavailable',
-        body: _error ?? 'Live playback is not available on this device yet.',
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 360,
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: controller.value.aspectRatio == 0
-                    ? 16 / 9
-                    : controller.value.aspectRatio,
-                child: VideoPlayer(controller),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: _ActionButton(
-                  label: controller.value.isPlaying ? 'Pause' : 'Play Live',
-                  icon: controller.value.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  onPressed: () async {
-                    if (controller.value.isPlaying) {
-                      await controller.pause();
-                    } else {
-                      await controller.play();
-                    }
-                    if (mounted) setState(() {});
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return LiveTopicHlsPlayer(hlsUrl: hlsUrl);
   }
 }
 
