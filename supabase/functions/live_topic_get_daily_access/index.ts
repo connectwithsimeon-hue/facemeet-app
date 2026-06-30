@@ -9,6 +9,7 @@ const corsHeaders = {
 
 const MAX_PARTICIPANTS = 4;
 const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
+const DAILY_HLS_START_TIMEOUT_MS = 10_000;
 
 type LiveTopicRow = {
   id: string;
@@ -20,6 +21,10 @@ type LiveTopicRow = {
   started_at: string | null;
   ends_at: string | null;
   max_speakers: number | null;
+  hls_status: string | null;
+  hls_playback_url: string | null;
+  hls_started_at: string | null;
+  hls_ended_at: string | null;
 };
 
 type UserRow = {
@@ -168,6 +173,53 @@ function safeErrorDetails(error: unknown) {
   return undefined;
 }
 
+function extractPlaybackUrl(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return /^https:\/\//i.test(trimmed) && /\.m3u8(\?|$)/i.test(trimmed)
+      ? trimmed
+      : "";
+  }
+  if (!value || typeof value !== "object") return "";
+
+  const data = value as Record<string, unknown>;
+  for (
+    const key of [
+      "hls_playback_url",
+      "hlsPlaybackUrl",
+      "playback_url",
+      "playbackUrl",
+      "hls_url",
+      "hlsUrl",
+      "url",
+    ]
+  ) {
+    const url = extractPlaybackUrl(data[key]);
+    if (url) return url;
+  }
+  return "";
+}
+
+function rtmpUrlLooksUsable(value: string) {
+  try {
+    const url = new URL(value);
+    const pathSegments = url.pathname.split("/").filter(Boolean);
+    return url.protocol === "rtmps:" &&
+      pathSegments.length >= 2 &&
+      pathSegments[0].toLowerCase() === "live";
+  } catch {
+    return false;
+  }
+}
+
+function playbackUrlLooksUsable(value: string) {
+  return Boolean(extractPlaybackUrl(value));
+}
+
+function logSafe(event: string, data: Record<string, unknown>) {
+  console.log(JSON.stringify({ event, ...data }));
+}
+
 async function fetchLiveTopic(
   adminClient: SupabaseClient,
   liveTopicId: string,
@@ -175,7 +227,7 @@ async function fetchLiveTopic(
   const { data, error } = await adminClient
     .from("live_topics")
     .select(
-      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers",
+      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers,hls_status,hls_playback_url,hls_started_at,hls_ended_at",
     )
     .eq("id", liveTopicId)
     .maybeSingle();
@@ -372,7 +424,7 @@ async function ensureDailyRoom(params: {
     .eq("id", params.topic.id)
     .eq("status", "live")
     .select(
-      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers",
+      "id,creator_user_id,cohost_user_id,status,daily_room_url,daily_room_name,started_at,ends_at,max_speakers,hls_status,hls_playback_url,hls_started_at,hls_ended_at",
     )
     .single();
 
@@ -384,6 +436,158 @@ async function ensureDailyRoom(params: {
     roomName: room.roomName,
     roomExpiresAt,
   };
+}
+
+async function persistHlsDiagnostic(
+  adminClient: SupabaseClient,
+  liveTopicId: string,
+  values: {
+    status?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    dailyStatus?: number | null;
+    dailyResponseKeys?: string[] | null;
+    playbackUrl?: string | null;
+    started?: boolean;
+  },
+) {
+  const update: Record<string, unknown> = {};
+  if (values.status) update.hls_status = values.status;
+  if (values.playbackUrl !== undefined) update.hls_playback_url = values.playbackUrl;
+  if (values.started) {
+    update.hls_started_at = new Date().toISOString();
+    update.hls_ended_at = null;
+  }
+  if (values.errorCode !== undefined) {
+    update.hls_last_error_code = values.errorCode;
+    update.hls_last_error_message = normalizeString(values.errorMessage).slice(0, 160) ||
+      values.errorCode;
+    update.hls_last_error_at = new Date().toISOString();
+    update.hls_last_daily_status = values.dailyStatus ?? null;
+    update.hls_last_daily_response_keys = values.dailyResponseKeys ?? [];
+  } else if (values.started) {
+    update.hls_last_error_code = null;
+    update.hls_last_error_message = null;
+    update.hls_last_error_at = null;
+    update.hls_last_daily_status = null;
+    update.hls_last_daily_response_keys = null;
+  }
+
+  const { error } = await adminClient
+    .from("live_topics")
+    .update(update)
+    .eq("id", liveTopicId);
+
+  if (error) {
+    logSafe("live_topic_daily_access_hls_diagnostic_write_failed", {
+      live_topic_id: liveTopicId,
+      error_code: "db_update_failed",
+    });
+  }
+}
+
+async function ensureHlsStartedFromDailyAccess(params: {
+  adminClient: SupabaseClient;
+  dailyApiKey: string;
+  topic: LiveTopicRow;
+  roomName: string;
+}) {
+  if (
+    params.topic.hls_status === "live" &&
+    normalizeString(params.topic.hls_playback_url).length > 0
+  ) {
+    return;
+  }
+  if (params.topic.hls_status === "pending") return;
+
+  const rtmpUrl = Deno.env.get("LIVE_TOPIC_HLS_RTMP_URL")?.trim() || "";
+  const playbackUrl =
+    Deno.env.get("LIVE_TOPIC_HLS_PLAYBACK_URL")?.trim() ||
+    Deno.env.get("LIVE_TOPIC_HLS_PLAYBACK_URL_TEMPLATE")?.trim() ||
+    "";
+  const rtmpUsable = rtmpUrlLooksUsable(rtmpUrl);
+  const playbackUsable = playbackUrlLooksUsable(playbackUrl);
+
+  if (!rtmpUsable || !playbackUsable) {
+    await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+      status: "failed",
+      errorCode: !rtmpUsable ? "invalid_rtmp_config" : "invalid_playback_config",
+      errorMessage: "Live playback output is not configured correctly.",
+      dailyStatus: null,
+      dailyResponseKeys: null,
+    });
+    return;
+  }
+
+  await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+    status: "pending",
+    errorCode: "daily_start_in_progress",
+    errorMessage: "Starting Daily live-streaming from host video access.",
+    dailyStatus: null,
+    dailyResponseKeys: null,
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DAILY_HLS_START_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.daily.co/v1/rooms/${
+        encodeURIComponent(params.roomName)
+      }/live-streaming/start`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.dailyApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rtmpUrl }),
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === "AbortError";
+    await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+      status: "failed",
+      errorCode: isTimeout ? "daily_start_timeout" : "daily_start_fetch_failed",
+      errorMessage: isTimeout
+        ? "Daily live-streaming start request timed out."
+        : "Daily live-streaming start request failed.",
+      dailyStatus: null,
+      dailyResponseKeys: null,
+    });
+    return;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const bodyText = await response.text().catch(() => "");
+  let responseBody: Record<string, unknown> = {};
+  if (bodyText.trim()) {
+    try {
+      responseBody = JSON.parse(bodyText) as Record<string, unknown>;
+    } catch {
+      responseBody = {};
+    }
+  }
+  const responseKeys = Object.keys(responseBody);
+
+  if (!response.ok) {
+    await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+      status: "failed",
+      errorCode: "daily_start_failed",
+      errorMessage: safeDailyProviderMessage(bodyText),
+      dailyStatus: response.status,
+      dailyResponseKeys: responseKeys,
+    });
+    return;
+  }
+
+  await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+    status: "live",
+    playbackUrl,
+    started: true,
+  });
 }
 
 serve(async (req) => {
@@ -439,6 +643,14 @@ serve(async (req) => {
 
     const callerUser = await fetchUser(adminClient, callerUserId);
     const access = await ensureDailyRoom({ adminClient, dailyApiKey, topic });
+    if (isHostOrCohost) {
+      await ensureHlsStartedFromDailyAccess({
+        adminClient,
+        dailyApiKey,
+        topic: access.topic,
+        roomName: access.roomName,
+      });
+    }
     const tokenResult = await createDailyMeetingToken({
       dailyApiKey,
       roomName: access.roomName,
