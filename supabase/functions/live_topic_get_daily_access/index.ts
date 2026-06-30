@@ -554,7 +554,6 @@ async function ensureHlsStartedFromDailyAccess(params: {
   ) {
     return;
   }
-  if (params.topic.hls_status === "pending") return;
 
   const rtmpUrl = Deno.env.get("LIVE_TOPIC_HLS_RTMP_URL")?.trim() || "";
   const playbackUrl =
@@ -637,11 +636,23 @@ async function ensureHlsStartedFromDailyAccess(params: {
       dailyResponseKeys: responseKeys,
     });
 
-    const replacementRoom = await createDailyRoom({
-      dailyApiKey: params.dailyApiKey,
-      roomName: params.roomName,
-      roomExpiresAt: roomExpiresAtIso(params.topic),
-    });
+    let replacementRoom: { roomUrl: string; roomName: string };
+    try {
+      replacementRoom = await createDailyRoom({
+        dailyApiKey: params.dailyApiKey,
+        roomName: params.roomName,
+        roomExpiresAt: roomExpiresAtIso(params.topic),
+      });
+    } catch {
+      await persistHlsDiagnostic(params.adminClient, params.topic.id, {
+        status: "failed",
+        errorCode: "daily_room_recreate_failed",
+        errorMessage: "Daily room could not be recreated after HLS start returned not found.",
+        dailyStatus: null,
+        dailyResponseKeys: null,
+      });
+      return;
+    }
 
     await params.adminClient
       .from("live_topics")

@@ -953,11 +953,33 @@ serve(async (req) => {
             },
           );
 
-          const replacementRoom = await createDailyRoom({
-            dailyApiKey,
-            roomName,
-            roomExpiresAt: roomExpiresAtIso(roomAccess.topic),
-          });
+          let replacementRoom: { roomUrl: string; roomName: string };
+          try {
+            replacementRoom = await createDailyRoom({
+              dailyApiKey,
+              roomName,
+              roomExpiresAt: roomExpiresAtIso(roomAccess.topic),
+            });
+          } catch {
+            const recreateError = makeHlsError("daily_room_recreate_failed", {
+              error_message:
+                "Daily room could not be recreated after HLS start returned not found.",
+              daily_status: 404,
+              daily_response_keys: diagnostics.daily_response_keys,
+              rtmp_url_usable: true,
+              playback_url_usable: true,
+            });
+            await updateTopicHls(adminClient, liveTopicId, {
+              hls_status: "failed",
+              hls_ended_at: null,
+            });
+            await persistHlsError(
+              adminClient,
+              liveTopicId,
+              safeErrorDiagnostics(recreateError),
+            );
+            throw recreateError;
+          }
           await adminClient
             .from("live_topics")
             .update({
