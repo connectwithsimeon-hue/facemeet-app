@@ -16,6 +16,21 @@ import '../../theme/app_theme.dart';
 import '../../services/daily_call_web.dart'
     if (dart.library.io) '../../services/daily_call_io.dart';
 
+const Duration _hlsViewerGracePeriod = Duration(minutes: 2);
+
+bool _hasRecentHlsPlaybackGrace(Map<String, dynamic>? topic) {
+  if (topic == null) return false;
+  final status = topic['status']?.toString();
+  if (status != 'ended' && status != 'expired') return false;
+  final hlsUrl = topic['hls_playback_url']?.toString().trim() ?? '';
+  if (hlsUrl.isEmpty) return false;
+  final endedAt =
+      DateTime.tryParse(topic['hls_ended_at']?.toString() ?? '') ??
+      DateTime.tryParse(topic['ended_at']?.toString() ?? '');
+  if (endedAt == null) return false;
+  return DateTime.now().difference(endedAt).abs() <= _hlsViewerGracePeriod;
+}
+
 class LiveTopicsScreen extends StatefulWidget {
   const LiveTopicsScreen({super.key});
 
@@ -1550,8 +1565,11 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
   Widget build(BuildContext context) {
     final topic = _liveTopic;
     final status = topic?['status']?.toString() ?? '';
+    final hasViewerPlaybackGrace =
+        !_isHostOrCohost && _hasRecentHlsPlaybackGrace(topic);
     final isEnded =
-        status == 'ended' || status == 'cancelled' || status == 'declined';
+        (status == 'ended' || status == 'cancelled' || status == 'declined') &&
+        !hasViewerPlaybackGrace;
     return Scaffold(
       backgroundColor: AppTheme.backgroundDark,
       appBar: AppBar(
@@ -1575,8 +1593,8 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                 children: [
                   _LiveRoomCard(topic: topic, timerText: _timeRemaining),
                   const SizedBox(height: 18),
-                  if (status == 'live') ...[
-                    if (_canUseDailyStage)
+                  if (status == 'live' || hasViewerPlaybackGrace) ...[
+                    if (status == 'live' && _canUseDailyStage) ...[
                       _LiveTopicVideoStage(
                         isHostOrCohost: _isHostOrCohost,
                         isWeb: kIsWeb,
@@ -1594,8 +1612,12 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                         onToggleMute: _toggleLiveTopicMute,
                         onToggleCamera: _toggleLiveTopicCamera,
                         onLeave: _leaveRoom,
-                      )
-                    else
+                      ),
+                      if (_isHostOrCohost) ...[
+                        const SizedBox(height: 12),
+                        const _LiveTopicFramingTipCard(),
+                      ],
+                    ] else
                       _LiveTopicAudienceCard(
                         topic: topic,
                         audienceAccess: _audienceAccess,
@@ -2663,6 +2685,7 @@ class _LiveTopicAudienceCard extends StatelessWidget {
       'daily_start_in_progress',
       'daily_start_response_received',
     }.contains(hlsLastErrorCode);
+    final hasPlaybackGrace = _hasRecentHlsPlaybackGrace(topic);
     final accessGranted =
         audienceAccess?['access_granted'] == true ||
         topic['viewer_access_type']?.toString().isNotEmpty == true;
@@ -2672,6 +2695,10 @@ class _LiveTopicAudienceCard extends StatelessWidget {
                 (topic['free_seats_remaining'] as num?)?.toInt() ??
                 0)
             .clamp(0, 20);
+
+    if (hasPlaybackGrace && hlsUrl.isNotEmpty) {
+      return _HlsPlaybackCard(hlsUrl: hlsUrl);
+    }
 
     if (status != 'live') {
       return const _VideoPlaceholderCard(
@@ -2719,7 +2746,7 @@ class _LiveTopicAudienceCard extends StatelessWidget {
         icon: Icons.podcasts_rounded,
         title: 'Live playback is being prepared',
         body:
-            'The host and co-host are live. Watch/listen playback will appear here when HLS is available.',
+            'Live playback usually runs 20-30 seconds behind the room. Keep this open while the stream catches up.',
       );
     }
 
@@ -2728,7 +2755,7 @@ class _LiveTopicAudienceCard extends StatelessWidget {
         icon: Icons.podcasts_rounded,
         title: 'Connecting live playback...',
         body:
-            'The room is live. Watch/listen playback is warming up and will appear here shortly.',
+            'The room is live. Playback is warming up and usually appears within 20-30 seconds.',
         showSpinner: true,
       );
     }
@@ -2737,7 +2764,43 @@ class _LiveTopicAudienceCard extends StatelessWidget {
       icon: Icons.podcasts_rounded,
       title: 'Live playback has not started yet',
       body:
-          'The host and co-host are live. Watch/listen playback will appear here after the host starts streaming.',
+          'The host and co-host are live. Playback will appear here as the stream catches up.',
+    );
+  }
+}
+
+class _LiveTopicFramingTipCard extends StatelessWidget {
+  const _LiveTopicFramingTipCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.center_focus_strong_rounded,
+            color: AppTheme.primary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'For clearer viewer playback, keep your phone sideways or sit back so both speakers fill the frame.',
+              style: GoogleFonts.dmSans(
+                color: Colors.white.withValues(alpha: 0.86),
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

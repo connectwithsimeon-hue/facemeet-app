@@ -105,7 +105,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
       }
       function setWarmingHint() {
         hint.classList.remove('hidden');
-        hint.textContent = 'Connecting live playback... the stream is warming up.';
+        hint.textContent = 'Connecting live playback... it usually runs 20-30 seconds behind the room.';
       }
       function playLive() {
         requestWakeLock();

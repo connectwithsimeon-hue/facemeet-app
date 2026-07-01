@@ -312,7 +312,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
             ? 'Connecting live playback...'
             : 'Loading live playback...',
         body: _isWaitingForStream
-            ? 'The live stream is warming up. This usually takes a few seconds.'
+            ? 'Live playback usually runs 20-30 seconds behind the room. Keep this open while the stream catches up.'
             : 'Preparing the live conversation stream.',
         showSpinner: true,
       );
@@ -323,7 +323,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
         icon: Icons.sensors_rounded,
         title: 'Connecting live playback...',
         body:
-            'The live stream is warming up. This usually takes a few seconds.',
+            'Live playback usually runs 20-30 seconds behind the room. Keep this open while the stream catches up.',
         showSpinner: true,
       );
     }
