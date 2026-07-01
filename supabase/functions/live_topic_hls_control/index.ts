@@ -50,6 +50,10 @@ function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i
     .test(value);
@@ -382,6 +386,23 @@ async function fetchDailyRoom(params: {
   const data = await response.json() as { url?: string; name?: string };
   if (!data.url || !data.name) throw new Error("daily_room_lookup_failed");
   return { roomUrl: data.url, roomName: data.name };
+}
+
+async function waitForDailyRoom(params: {
+  dailyApiKey: string;
+  roomName: string;
+  attempts?: number;
+}) {
+  const attempts = params.attempts ?? 4;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const room = await fetchDailyRoom({
+      dailyApiKey: params.dailyApiKey,
+      roomName: params.roomName,
+    }).catch(() => null);
+    if (room) return room;
+    await sleep(650 * (attempt + 1));
+  }
+  return null;
 }
 
 async function ensureDailyRoom(params: {
@@ -953,17 +974,31 @@ serve(async (req) => {
             },
           );
 
-          let replacementRoom: { roomUrl: string; roomName: string };
-          try {
-            replacementRoom = await createDailyRoom({
-              dailyApiKey,
-              roomName,
-              roomExpiresAt: roomExpiresAtIso(roomAccess.topic),
-            });
-          } catch {
+          let replacementRoom = await waitForDailyRoom({
+            dailyApiKey,
+            roomName,
+            attempts: 5,
+          });
+          if (!replacementRoom) {
+            try {
+              replacementRoom = await createDailyRoom({
+                dailyApiKey,
+                roomName,
+                roomExpiresAt: roomExpiresAtIso(roomAccess.topic),
+              });
+              await sleep(850);
+            } catch {
+              replacementRoom = await waitForDailyRoom({
+                dailyApiKey,
+                roomName,
+                attempts: 3,
+              });
+            }
+          }
+          if (!replacementRoom) {
             const recreateError = makeHlsError("daily_room_recreate_failed", {
               error_message:
-                "Daily room could not be recreated after HLS start returned not found.",
+                "Daily room could not be confirmed after HLS start returned not found.",
               daily_status: 404,
               daily_response_keys: diagnostics.daily_response_keys,
               rtmp_url_usable: true,

@@ -55,6 +55,10 @@ function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
     .test(value);
@@ -336,6 +340,23 @@ async function fetchDailyRoom(params: {
   const data = await response.json() as { url?: string; name?: string };
   if (!data.url || !data.name) throw new Error("daily_room_lookup_failed");
   return { roomUrl: data.url, roomName: data.name };
+}
+
+async function waitForDailyRoom(params: {
+  dailyApiKey: string;
+  roomName: string;
+  attempts?: number;
+}) {
+  const attempts = params.attempts ?? 4;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const room = await fetchDailyRoom({
+      dailyApiKey: params.dailyApiKey,
+      roomName: params.roomName,
+    }).catch(() => null);
+    if (room) return room;
+    await sleep(650 * (attempt + 1));
+  }
+  return null;
 }
 
 async function createDailyMeetingToken(params: {
@@ -636,20 +657,34 @@ async function ensureHlsStartedFromDailyAccess(params: {
       dailyResponseKeys: responseKeys,
     });
 
-    let replacementRoom: { roomUrl: string; roomName: string };
-    try {
-      replacementRoom = await createDailyRoom({
-        dailyApiKey: params.dailyApiKey,
-        roomName: params.roomName,
-        roomExpiresAt: roomExpiresAtIso(params.topic),
-      });
-    } catch {
+    let replacementRoom = await waitForDailyRoom({
+      dailyApiKey: params.dailyApiKey,
+      roomName: params.roomName,
+      attempts: 5,
+    });
+    if (!replacementRoom) {
+      try {
+        replacementRoom = await createDailyRoom({
+          dailyApiKey: params.dailyApiKey,
+          roomName: params.roomName,
+          roomExpiresAt: roomExpiresAtIso(params.topic),
+        });
+        await sleep(850);
+      } catch {
+        replacementRoom = await waitForDailyRoom({
+          dailyApiKey: params.dailyApiKey,
+          roomName: params.roomName,
+          attempts: 3,
+        });
+      }
+    }
+    if (!replacementRoom) {
       await persistHlsDiagnostic(params.adminClient, params.topic.id, {
         status: "failed",
         errorCode: "daily_room_recreate_failed",
-        errorMessage: "Daily room could not be recreated after HLS start returned not found.",
-        dailyStatus: null,
-        dailyResponseKeys: null,
+        errorMessage: "Daily room could not be confirmed after HLS start returned not found.",
+        dailyStatus: 404,
+        dailyResponseKeys: responseKeys,
       });
       return;
     }
