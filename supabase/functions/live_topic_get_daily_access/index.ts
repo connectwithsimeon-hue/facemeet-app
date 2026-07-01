@@ -220,6 +220,16 @@ function playbackUrlLooksUsable(value: string) {
   return Boolean(extractPlaybackUrl(value));
 }
 
+function dailyLiveStreamingStartBody(rtmpUrl: string) {
+  return JSON.stringify({
+    rtmpUrl,
+    layout: {
+      preset: "default",
+      max_cam_streams: 4,
+    },
+  });
+}
+
 function logSafe(event: string, data: Record<string, unknown>) {
   console.log(JSON.stringify({ event, ...data }));
 }
@@ -617,7 +627,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
           Authorization: `Bearer ${params.dailyApiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ rtmpUrl }),
+        body: dailyLiveStreamingStartBody(rtmpUrl),
         signal: controller.signal,
       },
     );
@@ -714,7 +724,7 @@ async function ensureHlsStartedFromDailyAccess(params: {
             Authorization: `Bearer ${params.dailyApiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ rtmpUrl }),
+          body: dailyLiveStreamingStartBody(rtmpUrl),
           signal: retryController.signal,
         },
       );

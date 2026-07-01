@@ -288,6 +288,16 @@ function playbackUrlLooksUsable(value: string) {
   return Boolean(extractPlaybackUrl(value));
 }
 
+function dailyLiveStreamingStartBody(rtmpUrl: string) {
+  return JSON.stringify({
+    rtmpUrl,
+    layout: {
+      preset: "default",
+      max_cam_streams: 4,
+    },
+  });
+}
+
 async function fetchLiveTopic(
   adminClient: SupabaseClient,
   liveTopicId: string,
@@ -478,9 +488,7 @@ async function callDailyLiveStreaming(params: {
   playbackUrlUsable?: boolean;
 }) {
   const requestBody = params.action === "start"
-    ? JSON.stringify({
-      rtmpUrl: params.rtmpUrl,
-    })
+    ? dailyLiveStreamingStartBody(params.rtmpUrl ?? "")
     : undefined;
 
   const controller = new AbortController();
