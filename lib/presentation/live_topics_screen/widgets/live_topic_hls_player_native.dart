@@ -24,6 +24,7 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
   Timer? _retryTimer;
   bool _isInitializing = true;
   bool _isWaitingForStream = false;
+  bool _fillFrame = false;
   String? _error;
   int _warmupAttempt = 0;
 
@@ -138,6 +139,160 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
     }
   }
 
+  double _playerHeight(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final width = media.size.width;
+    final maxUsableHeight = media.size.height * 0.68;
+    return (width * 1.08).clamp(420.0, maxUsableHeight.clamp(420.0, 620.0));
+  }
+
+  Widget _buildVideoSurface(
+    VideoPlayerController controller, {
+    required bool fullscreen,
+    VoidCallback? onFillChanged,
+  }) {
+    final borderRadius = fullscreen
+        ? BorderRadius.zero
+        : BorderRadius.circular(24);
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Container(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final videoSize = controller.value.size;
+                final videoWidth = videoSize.width == 0
+                    ? constraints.maxWidth
+                    : videoSize.width;
+                final videoHeight = videoSize.height == 0
+                    ? constraints.maxHeight
+                    : videoSize.height;
+                return FittedBox(
+                  fit: _fillFrame ? BoxFit.cover : BoxFit.contain,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: videoWidth,
+                    height: videoHeight,
+                    child: VideoPlayer(controller),
+                  ),
+                );
+              },
+            ),
+            Positioned(
+              left: 16,
+              top: 16,
+              child: SafeArea(
+                bottom: false,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(154),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white.withAlpha(36)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.circle, color: AppTheme.primary, size: 8),
+                      SizedBox(width: 8),
+                      Text(
+                        'Live',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 12,
+              top: 12,
+              child: SafeArea(
+                bottom: false,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PlayerControlButton(
+                      tooltip: _fillFrame ? 'Show full stream' : 'Fill frame',
+                      label: _fillFrame ? 'Fit' : 'Fill',
+                      onPressed: () {
+                        setState(() => _fillFrame = !_fillFrame);
+                        onFillChanged?.call();
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    _PlayerControlButton(
+                      tooltip: fullscreen ? 'Close fullscreen' : 'Expand',
+                      icon: fullscreen
+                          ? Icons.close_fullscreen_rounded
+                          : Icons.open_in_full_rounded,
+                      onPressed: fullscreen
+                          ? () => Navigator.of(context).maybePop()
+                          : () => _openFullscreen(controller),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: SafeArea(
+                top: false,
+                child: IconButton.filled(
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withAlpha(154),
+                    foregroundColor: Colors.white,
+                  ),
+                  tooltip: 'Resume live',
+                  onPressed: () => controller.play(),
+                  icon: const Icon(Icons.sensors_rounded),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFullscreen(VideoPlayerController controller) async {
+    await controller.play();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      PageRouteBuilder(
+        opaque: true,
+        barrierColor: Colors.black,
+        pageBuilder: (context, _, __) {
+          return Scaffold(
+            backgroundColor: Colors.black,
+            body: StatefulBuilder(
+              builder: (context, setFullscreenState) {
+                return SafeArea(
+                  child: _buildVideoSurface(
+                    controller,
+                    fullscreen: true,
+                    onFillChanged: () => setFullscreenState(() {}),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -183,84 +338,56 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer>
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 360,
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final videoSize = controller.value.size;
-                final videoWidth = videoSize.width == 0
-                    ? constraints.maxWidth
-                    : videoSize.width;
-                final videoHeight = videoSize.height == 0
-                    ? constraints.maxHeight
-                    : videoSize.height;
-                return FittedBox(
-                  fit: BoxFit.contain,
-                  clipBehavior: Clip.hardEdge,
-                  child: SizedBox(
-                    width: videoWidth,
-                    height: videoHeight,
-                    child: VideoPlayer(controller),
-                  ),
-                );
-              },
+    return SizedBox(
+      height: _playerHeight(context),
+      child: _buildVideoSurface(controller, fullscreen: false),
+    );
+  }
+}
+
+class _PlayerControlButton extends StatelessWidget {
+  final String tooltip;
+  final IconData? icon;
+  final String? label;
+  final VoidCallback onPressed;
+
+  const _PlayerControlButton({
+    required this.tooltip,
+    required this.onPressed,
+    this.icon,
+    this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.black.withAlpha(166),
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            height: 42,
+            constraints: const BoxConstraints(minWidth: 42),
+            padding: EdgeInsets.symmetric(horizontal: label == null ? 0 : 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withAlpha(38)),
             ),
-            Positioned(
-              left: 16,
-              top: 16,
-              child: SafeArea(
-                bottom: false,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+            child: icon != null
+                ? Icon(icon, color: Colors.white, size: 19)
+                : Text(
+                    label!,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(154),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.white.withAlpha(36)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.circle, color: AppTheme.primary, size: 8),
-                      SizedBox(width: 8),
-                      Text(
-                        'Live',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black.withAlpha(154),
-                    foregroundColor: Colors.white,
-                  ),
-                  tooltip: 'Resume live',
-                  onPressed: () => controller.play(),
-                  icon: const Icon(Icons.sensors_rounded),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

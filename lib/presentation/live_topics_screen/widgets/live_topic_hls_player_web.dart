@@ -58,8 +58,11 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     .wrap { position: relative; width: 100%; height: 100%; background: #000; }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .wrap.fill video { object-fit: cover; }
     .badge { position: absolute; left: 14px; top: 14px; padding: 8px 11px; border-radius: 999px; background: rgba(0,0,0,.58); color: white; font: 800 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; border: 1px solid rgba(255,255,255,.14); }
     .badge::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 99px; background: #ef4d3f; }
+    .controls { position: absolute; right: 12px; top: 12px; display: flex; gap: 8px; }
+    .control { min-width: 42px; height: 42px; padding: 0 13px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.66); color: white; font: 900 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; }
     .resume { position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.62); color: white; font: 800 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; }
     .hint { position: absolute; left: 14px; right: 14px; bottom: 68px; padding: 10px 12px; border-radius: 16px; background: rgba(0,0,0,.58); color: white; font: 600 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; text-align: center; pointer-events: none; }
     .hidden { display: none; }
@@ -67,18 +70,25 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
 </head>
 <body>
-  <div class="wrap">
+  <div id="wrap" class="wrap">
     <video id="video" playsinline webkit-playsinline autoplay></video>
     <div class="badge">Live</div>
+    <div class="controls">
+      <button id="fit" class="control" aria-label="Toggle fill mode">Fill</button>
+      <button id="expand" class="control" aria-label="Expand live playback">⛶</button>
+    </div>
     <button id="resume" class="resume" aria-label="Resume live playback">▶</button>
     <div id="hint" class="hint">Tap the video if live playback does not start automatically.</div>
   </div>
   <script>
     (function () {
       const src = $hlsUrl;
+      const wrap = document.getElementById('wrap');
       const video = document.getElementById('video');
       const hint = document.getElementById('hint');
       const resume = document.getElementById('resume');
+      const fit = document.getElementById('fit');
+      const expand = document.getElementById('expand');
       let wakeLock = null;
       let hls = null;
       let retryTimer = null;
@@ -132,6 +142,19 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
       video.addEventListener('error', scheduleRetry);
       video.addEventListener('click', playLive);
       resume.addEventListener('click', playLive);
+      fit.addEventListener('click', function () {
+        wrap.classList.toggle('fill');
+        fit.textContent = wrap.classList.contains('fill') ? 'Fit' : 'Fill';
+        playLive();
+      });
+      expand.addEventListener('click', function () {
+        playLive();
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(function () {});
+          return;
+        }
+        wrap.requestFullscreen?.().catch(function () {});
+      });
       document.addEventListener('visibilitychange', function () {
         if (!document.hidden) playLive();
       });
@@ -171,10 +194,15 @@ class _LiveTopicHlsPlayerState extends State<LiveTopicHlsPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final height = (media.size.width * 1.08).clamp(
+      420.0,
+      (media.size.height * 0.68).clamp(420.0, 620.0),
+    );
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: Container(
-        height: 360,
+        height: height,
         color: Colors.black,
         child: HtmlElementView(viewType: _viewType),
       ),
