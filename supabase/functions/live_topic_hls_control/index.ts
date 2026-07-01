@@ -11,6 +11,16 @@ const FALLBACK_ROOM_TTL_SECONDS = 20 * 60;
 const MAX_PARTICIPANTS = 4;
 const DAILY_START_TIMEOUT_MS = 10_000;
 const DAILY_STOP_TIMEOUT_MS = 8_000;
+const DAILY_START_NOT_FOUND_RETRY_DELAYS_MS = [
+  1_500,
+  2_000,
+  3_000,
+  4_000,
+  5_000,
+  6_000,
+  7_000,
+  8_000,
+];
 
 type LiveTopicRow = {
   id: string;
@@ -588,6 +598,68 @@ async function callDailyLiveStreaming(params: {
   return responseBody;
 }
 
+async function callDailyLiveStreamingStartWithReadinessRetry(params: {
+  dailyApiKey: string;
+  roomName: string;
+  rtmpUrl: string;
+  liveTopicId: string;
+  adminClient: SupabaseClient;
+  rtmpUrlUsable: boolean;
+  playbackUrlUsable: boolean;
+}) {
+  let lastError: unknown = null;
+
+  for (
+    let attempt = 0;
+    attempt <= DAILY_START_NOT_FOUND_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
+    try {
+      return await callDailyLiveStreaming({
+        dailyApiKey: params.dailyApiKey,
+        roomName: params.roomName,
+        action: "start",
+        rtmpUrl: params.rtmpUrl,
+        liveTopicId: params.liveTopicId,
+        adminClient: params.adminClient,
+        rtmpUrlUsable: params.rtmpUrlUsable,
+        playbackUrlUsable: params.playbackUrlUsable,
+      });
+    } catch (error) {
+      const diagnostics = safeErrorDiagnostics(error);
+      const shouldRetry =
+        diagnostics.daily_status === 404 &&
+        attempt < DAILY_START_NOT_FOUND_RETRY_DELAYS_MS.length;
+      if (!shouldRetry) throw error;
+
+      lastError = error;
+      const delayMs = DAILY_START_NOT_FOUND_RETRY_DELAYS_MS[attempt];
+      await writeHlsDiagnostic(
+        params.adminClient,
+        params.liveTopicId,
+        "daily_start_waiting_for_active_room",
+        "Daily room exists; waiting for the active meeting session before HLS start.",
+        {
+          daily_status: 404,
+          daily_response_keys: diagnostics.daily_response_keys,
+          rtmp_url_usable: params.rtmpUrlUsable,
+          playback_url_usable: params.playbackUrlUsable,
+        },
+      );
+      logSafe("live_topic_hls_daily_start_retry", {
+        live_topic_id: params.liveTopicId,
+        room_name_present: Boolean(params.roomName),
+        daily_status: 404,
+        attempt: attempt + 1,
+        next_delay_ms: delayMs,
+      });
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError ?? makeHlsError("daily_start_failed");
+}
+
 function playbackUrlFromTemplate(template: string, topic: LiveTopicRow, roomName: string) {
   const value = template
     .replaceAll("{live_topic_id}", encodeURIComponent(topic.id))
@@ -755,9 +827,7 @@ serve(async (req) => {
     const callerUserId = authData.user.id;
     const isHostOrCohost =
       topic.creator_user_id === callerUserId || topic.cohost_user_id === callerUserId;
-    const hasViewerAccess = action === "start" && !isHostOrCohost
-      ? await userHasLiveTopicViewerAccess(adminClient, liveTopicId, callerUserId)
-      : false;
+    const hasViewerAccess = false;
     logSafe("live_topic_hls_request", {
       action,
       live_topic_id: liveTopicId,
@@ -908,10 +978,9 @@ serve(async (req) => {
       });
 
       try {
-        const dailyBody = await callDailyLiveStreaming({
+        const dailyBody = await callDailyLiveStreamingStartWithReadinessRetry({
           dailyApiKey,
           roomName,
-          action: "start",
           rtmpUrl,
           liveTopicId,
           adminClient,
@@ -1026,10 +1095,9 @@ serve(async (req) => {
           roomName = replacementRoom.roomName;
 
           try {
-            const dailyBody = await callDailyLiveStreaming({
+            const dailyBody = await callDailyLiveStreamingStartWithReadinessRetry({
               dailyApiKey,
               roomName,
-              action: "start",
               rtmpUrl,
               liveTopicId,
               adminClient,

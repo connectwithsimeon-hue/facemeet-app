@@ -885,18 +885,6 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     return stageStatus == 'joined';
   }
 
-  bool get _hasAudienceWatchAccess {
-    if (_isHostOrCohost) return false;
-    final accessType =
-        _audienceAccess?['access_type']?.toString().trim() ??
-        _liveTopic?['viewer_access_type']?.toString().trim() ??
-        '';
-    return _audienceAccess?['access_granted'] == true || accessType.isNotEmpty;
-  }
-
-  bool get _canRequestHlsPlaybackStart =>
-      _isHostOrCohost || _hasAudienceWatchAccess;
-
   bool get _isApprovedUnpaidSpeaker {
     if (_isHostOrCohost) return false;
     final requestStatus = _liveTopic?['viewer_request_status']?.toString();
@@ -981,7 +969,6 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
       );
       if (!mounted) return;
       setState(() => _liveTopic = updated);
-      await _startHlsPlayback(force: true);
       await _load(silent: true);
     } catch (error) {
       debugPrint('LIVE TOPIC: start failed — $error');
@@ -1085,7 +1072,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
         _isLoadingDailyAccess = false;
       });
       if (_isHostOrCohost) {
-        unawaited(_startHlsPlayback(force: true));
+        _scheduleHostHlsStartAfterJoin(const Duration(seconds: 5));
       }
     } catch (error) {
       debugPrint('LIVE TOPIC DAILY: access failed — $error');
@@ -1105,7 +1092,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     final isRetryCoolingDown =
         lastAttempt != null &&
         DateTime.now().difference(lastAttempt) < const Duration(seconds: 20);
-    if (!_canRequestHlsPlaybackStart ||
+    if (!_isHostOrCohost ||
         status != 'live' ||
         hlsStatus == 'live' ||
         hlsStatus == 'pending' ||
@@ -1117,13 +1104,34 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
     unawaited(_startHlsPlayback(force: true));
   }
 
+  void _handleDailyStageConnected() {
+    _scheduleHostHlsStartAfterJoin(const Duration(seconds: 2));
+  }
+
+  void _scheduleHostHlsStartAfterJoin(Duration delay) {
+    if (!_isHostOrCohost || _liveTopic?['status']?.toString() != 'live') {
+      return;
+    }
+
+    unawaited(
+      Future<void>.delayed(delay, () async {
+        if (!mounted ||
+            !_isHostOrCohost ||
+            _liveTopic?['status']?.toString() != 'live') {
+          return;
+        }
+        await _startHlsPlayback(force: true);
+      }),
+    );
+  }
+
   Future<void> _startHlsPlayback({bool force = false}) async {
     final topic = _liveTopic;
     final id = topic?['id']?.toString() ?? '';
     final status = topic?['status']?.toString();
     final hlsStatus = topic?['hls_status']?.toString();
     if (id.isEmpty ||
-        !_canRequestHlsPlaybackStart ||
+        !_isHostOrCohost ||
         status != 'live' ||
         _isStartingHls ||
         hlsStatus == 'live' ||
@@ -1604,6 +1612,7 @@ class _LiveTopicDetailScreenState extends State<LiveTopicDetailScreen>
                         meetingToken: _dailyMeetingToken,
                         dailyCallKey: _dailyCallKey,
                         webDailyCallKey: _webDailyCallKey,
+                        onConnected: _handleDailyStageConnected,
                         onRetry: () => _loadDailyAccess(force: true),
                         onEnded: () => unawaited(_handleDailyCallEnded()),
                         onRefreshDailyAccess: _refreshDailyAccess,
@@ -2391,6 +2400,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
   final String? meetingToken;
   final GlobalKey<DailyCallViewState> dailyCallKey;
   final GlobalKey<SparkVideoWebViewState> webDailyCallKey;
+  final VoidCallback onConnected;
   final VoidCallback onRetry;
   final VoidCallback onEnded;
   final Future<Map<String, String>?> Function() onRefreshDailyAccess;
@@ -2409,6 +2419,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
     required this.meetingToken,
     required this.dailyCallKey,
     required this.webDailyCallKey,
+    required this.onConnected,
     required this.onRetry,
     required this.onEnded,
     required this.onRefreshDailyAccess,
@@ -2478,7 +2489,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
                 key: webDailyCallKey,
                 roomUrl: safeRoomUrl,
                 meetingToken: safeMeetingToken,
-                onConnected: () {},
+                onConnected: onConnected,
                 onEndRequested: onEnded,
                 onMuteChanged: (_) {},
                 onCameraChanged: (_) {},
@@ -2489,6 +2500,7 @@ class _LiveTopicVideoStage extends StatelessWidget {
                 key: dailyCallKey,
                 roomUrl: safeRoomUrl,
                 meetingToken: safeMeetingToken,
+                onCallConnected: onConnected,
                 onCallEnded: onEnded,
                 onCallError: (_) {},
                 onRefreshDailyAccess: onRefreshDailyAccess,
